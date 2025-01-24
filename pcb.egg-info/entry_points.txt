@@ -1,0 +1,2 @@
+[console_scripts]
+pcb = cli:main
