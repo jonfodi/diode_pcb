@@ -13,5 +13,3 @@ authors = [
 [project.urls]
 Homepage = "https://github.com/diodinc/pcb"
 
-[project.scripts]
-pcb = "cli:main"
