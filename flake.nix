@@ -315,7 +315,7 @@
     in
     pkgs.stdenv.mkDerivation {
       pname = "pcb-cli";
-      version = "0.1.0";
+      version = "0.0.13";
 
       src = pkgs.fetchurl {
         inherit (binaryAttrs) url sha256;
@@ -391,7 +391,7 @@
       '';
 
       meta = with pkgs.lib; {
-        description = "CLI tool for designing PCBs with KiCad.";
+        description = "CLI tool for designing PCBs.";
         license = licenses.mit;
         maintainers = [ ];
         platforms = [ "x86_64-linux" "aarch64-linux" ];
