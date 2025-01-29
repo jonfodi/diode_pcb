@@ -15,11 +15,11 @@
 
     getBinaryAttrs = system: 
       if system == "x86_64-linux" then {
-        url = "https://ylzepdfnnbhhwmvlrwqa.supabase.co/storage/v1/object/public/cli-releases/v0.0.13/x86_64-unknown-linux-gnu/pcb";
-        sha256 = "";
+        url = "https://ylzepdfnnbhhwmvlrwqa.supabase.co/storage/v1/object/public/cli-releases/v0.0.14/x86_64-unknown-linux-gnu/pcb";
+        sha256 = "0wr0rc0h5zvcvwxnkqpx1m2368kw5r8prfbcbr1as7cffr94r6s2";
       } else if system == "aarch64-linux" then {
-        url = "https://ylzepdfnnbhhwmvlrwqa.supabase.co/storage/v1/object/public/cli-releases/v0.0.13/aarch64-unknown-linux-gnu/pcb";
-        sha256 = "sha256-jH6sluo+vkmPqZi56dEj0QZXAId0YUuip8tjR5s/srk=";
+        url = "https://ylzepdfnnbhhwmvlrwqa.supabase.co/storage/v1/object/public/cli-releases/v0.0.14/aarch64-unknown-linux-gnu/pcb";
+        sha256 = "1xsly47nn67vdmjxhna2i1v7x4qk08x0lkspdghdj3fvjiilwvza";
       } else throw "Unsupported system: ${system}";
 
     mkCaseConverter = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
@@ -315,7 +315,7 @@
     in
     pkgs.stdenv.mkDerivation {
       pname = "pcb-cli";
-      version = "0.0.13";
+      version = "0.0.14";
 
       src = pkgs.fetchurl {
         inherit (binaryAttrs) url sha256;
