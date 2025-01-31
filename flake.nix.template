@@ -15,10 +15,10 @@
 
     getBinaryAttrs = system: 
       if system == "x86_64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/v{{ version }}/download/x86_64-unknown-linux-gnu_pcb";
+        url = "https://github.com/diodeinc/pcb/releases/download/v{{ version }}/x86_64-unknown-linux-gnu_pcb";
         sha256 = "{{ x86_64_sha256 }}";
       } else if system == "aarch64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/v{{ version }}/download/aarch64-unknown-linux-gnu_pcb";
+        url = "https://github.com/diodeinc/pcb/releases/download/v{{ version }}/aarch64-unknown-linux-gnu_pcb";
         sha256 = "{{ aarch64_sha256 }}";
       } else throw "Unsupported system: ${system}";
 
