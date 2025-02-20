@@ -357,6 +357,7 @@
           atopile
           openCmd
           jre
+          zlib
         ];
       in ''
         mkdir -p $out/bin
