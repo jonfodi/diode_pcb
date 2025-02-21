@@ -15,11 +15,11 @@
 
     getBinaryAttrs = system: 
       if system == "x86_64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.20/x86_64-unknown-linux-gnu_pcb";
-        sha256 = "019056a34c85f70f8228cad7509559ce5124ecac403f3537d49b3a6c1343020c";
+        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.21/x86_64-unknown-linux-gnu_pcb";
+        sha256 = "42b34b90df8ff2ee2b674e045576d00f8b5864e6c49243bee055067a1b4d1bfc";
       } else if system == "aarch64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.20/aarch64-unknown-linux-gnu_pcb";
-        sha256 = "ca1ddb8b5152284d6132cad7d2281067ce1834ccaf6c5de554dcb2d5bcc30fdb";
+        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.21/aarch64-unknown-linux-gnu_pcb";
+        sha256 = "9b25c0d4005970213ff8a454e93a5abe00f43adf22544e1f0c4d4a72ec8b78a5";
       } else throw "Unsupported system: ${system}";
 
     mkCaseConverter = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
@@ -315,7 +315,7 @@
     in
     pkgs.stdenv.mkDerivation {
       pname = "pcb-cli";
-      version = "0.0.20";
+      version = "0.0.21";
 
       src = pkgs.fetchurl {
         inherit (binaryAttrs) url sha256;
