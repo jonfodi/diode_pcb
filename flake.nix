@@ -76,42 +76,6 @@
       };
     };
 
-    mkKiKit = pkgs: 
-    let
-      solidpython = mkSolidPython pkgs;
-    in
-    pkgs.python3.pkgs.buildPythonPackage rec {
-      pname = "KiKit";
-      version = "f972993";
-      format = "setuptools";
-      
-      src = pkgs.fetchFromGitHub {
-        owner = "yaqwsx";
-        repo = "KiKit";
-        rev = "f972993dfdda8c17ce18ecde25d674b7c9391dad";
-        sha256 = "0pw4nvsm741by2qy4zywf5a4ibrn5ll03s0xiiym6xc99agh5jqx";
-      };
-
-      propagatedBuildInputs = with pkgs.python3.pkgs; [
-        click
-        shapely
-        numpy
-        markdown2
-        pybars3
-        solidpython
-        pcbnewtransition
-        commentjson
-      ];
-
-      doCheck = false;
-
-      meta = with pkgs.lib; {
-        description = "Automation tools for KiCad";
-        homepage = "https://github.com/yaqwsx/KiKit";
-        license = licenses.mit;
-      };
-    };
-
     mkKinparse = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
       pname = "kinparse";
       version = "4410797";
@@ -292,7 +256,7 @@
 
     mkKicadPython = pkgs: 
     let
-      kikit = mkKiKit pkgs;
+      kikit = pkgs.kikit;
       kinparse = mkKinparse pkgs;
     in
     pkgs.python3.withPackages (ps: [ kikit kinparse ]);
