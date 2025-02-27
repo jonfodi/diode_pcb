@@ -299,6 +299,7 @@
       nativeBuildInputs = [ 
         pkgs.patchelf
         pkgs.makeWrapper
+        pkgs.shared-mime-info
       ];
       
       dontUnpack = false;
@@ -334,13 +335,35 @@
         # Install the patched binary
         cp ./pcb $out/bin/pcb.real
         chmod +x $out/bin/pcb.real
+        
+        # Expose KiCad MIME types and rebuild database so xdg-open works
+        mkdir -p $out/share/mime/packages
+        mkdir -p $out/share/applications
+        cp ${kicadWithScripting}/share/mime/packages/*.xml $out/share/mime/packages/ || true
+        cp -r ${kicadWithScripting}/share/applications/* $out/share/applications/ || true
+        sed -i "s|Exec=pcbnew|Exec=env -u XDG_CONFIG_HOME ${kicadWithScripting}/bin/pcbnew|g" $out/share/applications/org.kicad.pcbnew.desktop
+        ${pkgs.shared-mime-info}/bin/update-mime-database $out/share/mime
+
+        # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
+        # (sorry)
+        KICAD_PYTHON_PATH=$(grep "export PYTHONPATH=" ${kicadWithScripting}/bin/pcbnew | sed 's/export PYTHONPATH=//' | sed "s/'//g")
 
         # Wrap the binary with the correct environment
         makeWrapper $out/bin/pcb.real $out/bin/pcb \
           --set ATO_PATH "${atopile}/bin/ato" \
           --set KICAD_PYTHON_INTERPRETER "${kicadPython}/bin/python3" \
+          --set PYTHONPATH "$KICAD_PYTHON_PATH" \
           --set KICAD_CLI "${kicadWithScripting}/bin/kicad-cli" \
+          --set XDG_DATA_DIRS "$out/share:$XDG_DATA_DIRS" \
+          --set XDG_CONFIG_HOME "$out/config" \
           --prefix PATH : "${openCmd}/bin:${jre}/bin"
+
+        # Configure KiCad files to open with our KiCad installation
+        mkdir -p $out/config
+        cat > $out/config/mimeapps.list << EOF
+[Default Applications]
+application/x-kicad-pcb=org.kicad.pcbnew.desktop
+EOF
 
         # Generate shell completions
         mkdir -p $out/share/shell-completions
