@@ -76,42 +76,6 @@
       };
     };
 
-    mkKiKit = pkgs: 
-    let
-      solidpython = mkSolidPython pkgs;
-    in
-    pkgs.python3.pkgs.buildPythonPackage rec {
-      pname = "KiKit";
-      version = "f972993";
-      format = "setuptools";
-      
-      src = pkgs.fetchFromGitHub {
-        owner = "yaqwsx";
-        repo = "KiKit";
-        rev = "f972993dfdda8c17ce18ecde25d674b7c9391dad";
-        sha256 = "0pw4nvsm741by2qy4zywf5a4ibrn5ll03s0xiiym6xc99agh5jqx";
-      };
-
-      propagatedBuildInputs = with pkgs.python3.pkgs; [
-        click
-        shapely
-        numpy
-        markdown2
-        pybars3
-        solidpython
-        pcbnewtransition
-        commentjson
-      ];
-
-      doCheck = false;
-
-      meta = with pkgs.lib; {
-        description = "Automation tools for KiCad";
-        homepage = "https://github.com/yaqwsx/KiKit";
-        license = licenses.mit;
-      };
-    };
-
     mkKinparse = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
       pname = "kinparse";
       version = "4410797";
@@ -292,7 +256,7 @@
 
     mkKicadPython = pkgs: 
     let
-      kikit = mkKiKit pkgs;
+      kikit = pkgs.kikit;
       kinparse = mkKinparse pkgs;
     in
     pkgs.python3.withPackages (ps: [ kikit kinparse ]);
@@ -335,6 +299,7 @@
       nativeBuildInputs = [ 
         pkgs.patchelf
         pkgs.makeWrapper
+        pkgs.shared-mime-info
       ];
       
       dontUnpack = false;
@@ -370,13 +335,35 @@
         # Install the patched binary
         cp ./pcb $out/bin/pcb.real
         chmod +x $out/bin/pcb.real
+        
+        # Expose KiCad MIME types and rebuild database so xdg-open works
+        mkdir -p $out/share/mime/packages
+        mkdir -p $out/share/applications
+        cp ${kicadWithScripting}/share/mime/packages/*.xml $out/share/mime/packages/ || true
+        cp -r ${kicadWithScripting}/share/applications/* $out/share/applications/ || true
+        sed -i "s|Exec=pcbnew|Exec=env -u XDG_CONFIG_HOME ${kicadWithScripting}/bin/pcbnew|g" $out/share/applications/org.kicad.pcbnew.desktop
+        ${pkgs.shared-mime-info}/bin/update-mime-database $out/share/mime
+
+        # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
+        # (sorry)
+        KICAD_PYTHON_PATH=$(grep "export PYTHONPATH=" ${kicadWithScripting}/bin/pcbnew | sed 's/export PYTHONPATH=//' | sed "s/'//g")
 
         # Wrap the binary with the correct environment
         makeWrapper $out/bin/pcb.real $out/bin/pcb \
           --set ATO_PATH "${atopile}/bin/ato" \
           --set KICAD_PYTHON_INTERPRETER "${kicadPython}/bin/python3" \
+          --set PYTHONPATH "$KICAD_PYTHON_PATH" \
           --set KICAD_CLI "${kicadWithScripting}/bin/kicad-cli" \
+          --set XDG_DATA_DIRS "$out/share:$XDG_DATA_DIRS" \
+          --set XDG_CONFIG_HOME "$out/config" \
           --prefix PATH : "${openCmd}/bin:${jre}/bin"
+
+        # Configure KiCad files to open with our KiCad installation
+        mkdir -p $out/config
+        cat > $out/config/mimeapps.list << EOF
+[Default Applications]
+application/x-kicad-pcb=org.kicad.pcbnew.desktop
+EOF
 
         # Generate shell completions
         mkdir -p $out/share/shell-completions
