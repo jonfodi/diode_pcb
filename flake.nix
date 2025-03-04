@@ -15,11 +15,11 @@
 
     getBinaryAttrs = system: 
       if system == "x86_64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.22/x86_64-unknown-linux-gnu_pcb";
-        sha256 = "9b8e1629f9b83b716ba1f1937da509508c26ea62bbf97a10e9aa1b20b356c21a";
+        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.23/x86_64-unknown-linux-gnu_pcb";
+        sha256 = "bda570cca7bcea0861a482d027a7987bc9f9fbce865acc321d38a795de282c0c";
       } else if system == "aarch64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.22/aarch64-unknown-linux-gnu_pcb";
-        sha256 = "9ab203a5b6b248596bd26cf8645656877c0739fe680124e31641f3266321ecc0";
+        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.23/aarch64-unknown-linux-gnu_pcb";
+        sha256 = "d4bf8236e8a3407ff06763c463c94c143c94f3bdd5680fd7f3cdca1e72e54ae1";
       } else throw "Unsupported system: ${system}";
 
     mkCaseConverter = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
@@ -73,6 +73,42 @@
         description = "Python interface to OpenSCAD";
         homepage = "https://github.com/SolidCode/SolidPython";
         license = licenses.lgpl21;
+      };
+    };
+
+    mkKiKit = pkgs: 
+    let
+      solidpython = mkSolidPython pkgs;
+    in
+    pkgs.python3.pkgs.buildPythonPackage rec {
+      pname = "KiKit";
+      version = "f972993";
+      format = "setuptools";
+      
+      src = pkgs.fetchFromGitHub {
+        owner = "yaqwsx";
+        repo = "KiKit";
+        rev = "f972993dfdda8c17ce18ecde25d674b7c9391dad";
+        sha256 = "0pw4nvsm741by2qy4zywf5a4ibrn5ll03s0xiiym6xc99agh5jqx";
+      };
+
+      propagatedBuildInputs = with pkgs.python3.pkgs; [
+        click
+        shapely
+        numpy
+        markdown2
+        pybars3
+        solidpython
+        pcbnewtransition
+        commentjson
+      ];
+
+      doCheck = false;
+
+      meta = with pkgs.lib; {
+        description = "Automation tools for KiCad";
+        homepage = "https://github.com/yaqwsx/KiKit";
+        license = licenses.mit;
       };
     };
 
@@ -256,7 +292,7 @@
 
     mkKicadPython = pkgs: 
     let
-      kikit = pkgs.kikit;
+      kikit = mkKiKit pkgs;
       kinparse = mkKinparse pkgs;
     in
     pkgs.python3.withPackages (ps: [ kikit kinparse ]);
@@ -279,7 +315,7 @@
     in
     pkgs.stdenv.mkDerivation {
       pname = "pcb-cli";
-      version = "0.0.22";
+      version = "0.0.23";
 
       src = pkgs.fetchurl {
         inherit (binaryAttrs) url sha256;
@@ -299,7 +335,6 @@
       nativeBuildInputs = [ 
         pkgs.patchelf
         pkgs.makeWrapper
-        pkgs.shared-mime-info
       ];
       
       dontUnpack = false;
@@ -335,35 +370,13 @@
         # Install the patched binary
         cp ./pcb $out/bin/pcb.real
         chmod +x $out/bin/pcb.real
-        
-        # Expose KiCad MIME types and rebuild database so xdg-open works
-        mkdir -p $out/share/mime/packages
-        mkdir -p $out/share/applications
-        cp ${kicadWithScripting}/share/mime/packages/*.xml $out/share/mime/packages/ || true
-        cp -r ${kicadWithScripting}/share/applications/* $out/share/applications/ || true
-        sed -i "s|Exec=pcbnew|Exec=env -u XDG_CONFIG_HOME ${kicadWithScripting}/bin/pcbnew|g" $out/share/applications/org.kicad.pcbnew.desktop
-        ${pkgs.shared-mime-info}/bin/update-mime-database $out/share/mime
-
-        # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
-        # (sorry)
-        KICAD_PYTHON_PATH=$(grep "export PYTHONPATH=" ${kicadWithScripting}/bin/pcbnew | sed 's/export PYTHONPATH=//' | sed "s/'//g")
 
         # Wrap the binary with the correct environment
         makeWrapper $out/bin/pcb.real $out/bin/pcb \
           --set ATO_PATH "${atopile}/bin/ato" \
           --set KICAD_PYTHON_INTERPRETER "${kicadPython}/bin/python3" \
-          --set PYTHONPATH "$KICAD_PYTHON_PATH" \
           --set KICAD_CLI "${kicadWithScripting}/bin/kicad-cli" \
-          --set XDG_DATA_DIRS "$out/share:$XDG_DATA_DIRS" \
-          --set XDG_CONFIG_HOME "$out/config" \
           --prefix PATH : "${openCmd}/bin:${jre}/bin"
-
-        # Configure KiCad files to open with our KiCad installation
-        mkdir -p $out/config
-        cat > $out/config/mimeapps.list << EOF
-[Default Applications]
-application/x-kicad-pcb=org.kicad.pcbnew.desktop
-EOF
 
         # Generate shell completions
         mkdir -p $out/share/shell-completions
