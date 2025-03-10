@@ -344,15 +344,31 @@
         sed -i "s|Exec=pcbnew|Exec=env -u XDG_CONFIG_HOME ${kicadWithScripting}/bin/pcbnew|g" $out/share/applications/org.kicad.pcbnew.desktop
         ${pkgs.shared-mime-info}/bin/update-mime-database $out/share/mime
 
+        # Create the plugin directory structure
+        mkdir -p $out/lib/kicad/scripting/plugins/diode
+
+        # Extract the KiCad plugin from the pcb binary directly to our plugin directory
+        ./pcb self install no-all kicad-plugin --kicad-plugin-dir $out/lib/kicad/scripting/plugins/diode
+
         # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
         # (sorry)
         KICAD_PYTHON_PATH=$(grep "export PYTHONPATH=" ${kicadWithScripting}/bin/pcbnew | sed 's/export PYTHONPATH=//' | sed "s/'//g")
+
+        # Set up plugin paths
+        KICAD_PLUGIN_PATH="$out/lib/kicad/scripting/plugins"
+        COMBINED_PYTHON_PATH="$KICAD_PYTHON_PATH:$KICAD_PLUGIN_PATH"
+
+        # Create a .pth file in the Python site-packages to ensure the plugins are found
+        PYTHON_SITE_PACKAGES=$(echo ${kicadPython}/lib/python*/site-packages)
+        mkdir -p $out/lib/python-packages
+        echo "$KICAD_PLUGIN_PATH" > $out/lib/python-packages/diode_plugin.pth
+        COMBINED_PYTHON_PATH="$COMBINED_PYTHON_PATH:$out/lib/python-packages"
 
         # Wrap the binary with the correct environment
         makeWrapper $out/bin/pcb.real $out/bin/pcb \
           --set ATO_PATH "${atopile}/bin/ato" \
           --set KICAD_PYTHON_INTERPRETER "${kicadPython}/bin/python3" \
-          --set PYTHONPATH "$KICAD_PYTHON_PATH" \
+          --set PYTHONPATH "$COMBINED_PYTHON_PATH" \
           --set KICAD_CLI "${kicadWithScripting}/bin/kicad-cli" \
           --set XDG_DATA_DIRS "$out/share:$XDG_DATA_DIRS" \
           --set XDG_CONFIG_HOME "$out/config" \
