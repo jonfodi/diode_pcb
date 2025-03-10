@@ -345,35 +345,27 @@
         ${pkgs.shared-mime-info}/bin/update-mime-database $out/share/mime
 
         # Create the plugin directory structure
-        mkdir -p $out/lib/kicad/scripting/plugins/diode
+        mkdir -p $out/lib/kicad/plugins/diode
 
         # Extract the KiCad plugin from the pcb binary directly to our plugin directory
         mkdir -p $out/.diode
-        DIODE_CONFIG_PATH=$out/.diode $out/bin/pcb.real self install no-all kicad_plugin --kicad-plugin-dir $out/lib/kicad/scripting/plugins/diode
+        DIODE_CONFIG_PATH=$out/.diode $out/bin/pcb.real self install no-all kicad_plugin --kicad-plugin-dir $out/lib/kicad/plugins/diode
+        mv $out/lib/kicad/plugins/diode/diode_kicad.py $out/lib/kicad/plugins/diode/__init__.py
         rm -rf $out/.diode
 
         # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
         # (sorry)
         KICAD_PYTHON_PATH=$(grep "export PYTHONPATH=" ${kicadWithScripting}/bin/pcbnew | sed 's/export PYTHONPATH=//' | sed "s/'//g")
 
-        # Set up plugin paths
-        KICAD_PLUGIN_PATH="$out/lib/kicad/scripting/plugins"
-        COMBINED_PYTHON_PATH="$KICAD_PYTHON_PATH:$KICAD_PLUGIN_PATH"
-
-        # Create a .pth file in the Python site-packages to ensure the plugins are found
-        PYTHON_SITE_PACKAGES=$(echo ${kicadPython}/lib/python*/site-packages)
-        mkdir -p $out/lib/python-packages
-        echo "$KICAD_PLUGIN_PATH" > $out/lib/python-packages/diode_plugin.pth
-        COMBINED_PYTHON_PATH="$COMBINED_PYTHON_PATH:$out/lib/python-packages"
-
         # Wrap the binary with the correct environment
         makeWrapper $out/bin/pcb.real $out/bin/pcb \
           --set ATO_PATH "${atopile}/bin/ato" \
           --set KICAD_PYTHON_INTERPRETER "${kicadPython}/bin/python3" \
-          --set PYTHONPATH "$COMBINED_PYTHON_PATH" \
+          --set PYTHONPATH "$KICAD_PYTHON_PATH" \
           --set KICAD_CLI "${kicadWithScripting}/bin/kicad-cli" \
           --set XDG_DATA_DIRS "$out/share:$XDG_DATA_DIRS" \
           --set XDG_CONFIG_HOME "$out/config" \
+          --set KICAD9_3RD_PARTY "$out/lib/kicad/" \
           --prefix PATH : "${openCmd}/bin:${jre}/bin"
 
         # Configure KiCad files to open with our KiCad installation
