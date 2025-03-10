@@ -349,7 +349,7 @@
 
         # Extract the KiCad plugin from the pcb binary directly to our plugin directory
         mkdir -p $out/.diode
-        DIODE_CONFIG_PATH=$out/.diode $out/bin/pcb.real self install no-all kicad-plugin --kicad-plugin-dir $out/lib/kicad/scripting/plugins/diode
+        DIODE_CONFIG_PATH=$out/.diode $out/bin/pcb.real self install no-all kicad_plugin --kicad-plugin-dir $out/lib/kicad/scripting/plugins/diode
         rm -rf $out/.diode
 
         # We need to pipe the KiCad PYTHONPATH through to our script to get `pcbnew`
