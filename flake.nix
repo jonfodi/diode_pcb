@@ -15,11 +15,11 @@
 
     getBinaryAttrs = system: 
       if system == "x86_64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.24/x86_64-unknown-linux-gnu_pcb";
-        sha256 = "bd4fe2e431a336c079502d6b786880c3e9593748d258fa4e6c24beb77da503c9";
+        url = "https://github.com/diodeinc/pcb/releases/download/prerelease-0.1.0-639470a/x86_64-unknown-linux-gnu_pcb";
+        sha256 = "1d24150a5afbb457680d350eef1bc0d4c644d01d562b0fe014c2ef471ce3ff07";
       } else if system == "aarch64-linux" then {
-        url = "https://github.com/diodeinc/pcb/releases/download/v0.0.24/aarch64-unknown-linux-gnu_pcb";
-        sha256 = "bd40ff6650fe273befaf2c982188d692a190dfeac8a1cf6816115e683a045e56";
+        url = "https://github.com/diodeinc/pcb/releases/download/prerelease-0.1.0-639470a/aarch64-unknown-linux-gnu_pcb";
+        sha256 = "3cf1935b497edec3a387da9331d215d914a54daeba851b7e1a76adb3b65cf987";
       } else throw "Unsupported system: ${system}";
 
     mkCaseConverter = pkgs: pkgs.python3.pkgs.buildPythonPackage rec {
