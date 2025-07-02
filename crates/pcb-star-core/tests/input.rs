@@ -219,7 +219,7 @@ snapshot_eval!(interface_net_incompatible, {
 
 snapshot_eval!(interface_net_template_basic, {
     "Module.star" => r#"
-        MyInterface = interface(test = Net("MYTEST", prop=True, value="123"))
+        MyInterface = interface(test = Net("MYTEST"))
         instance = MyInterface("PREFIX")
 
         Component(
@@ -235,9 +235,9 @@ snapshot_eval!(interface_net_template_basic, {
 snapshot_eval!(interface_multiple_net_templates, {
     "test.star" => r#"
         Power = interface(
-            vcc = Net("3V3", voltage="3.3V", type="power"),
-            gnd = Net("GND", type="ground"),
-            enable = Net("EN", active="high")
+            vcc = Net("3V3"),
+            gnd = Net("GND"),
+            enable = Net("EN")
         )
 
         pwr1 = Power("MCU")
@@ -273,8 +273,8 @@ snapshot_eval!(interface_nested_template, {
     "test.star" => r#"
         # Nested interface templates
         PowerNets = interface(
-            vcc = Net("VCC", type="power"),
-            gnd = Net("GND", type="ground")
+            vcc = Net("VCC"),
+            gnd = Net("GND")
         )
 
         # Create a pre-configured power instance
@@ -306,59 +306,19 @@ snapshot_eval!(interface_nested_template, {
     "#
 });
 
-snapshot_eval!(interface_template_property_inheritance, {
-    "test.star" => r#"
-        # Test that properties are properly copied from templates
-        SignalInterface = interface(
-            clk = Net("CLK", frequency="100MHz", type="clock"),
-            data = Net("DATA", width="8", direction="bidirectional"),
-            valid = Net("VALID", active="high")
-        )
-
-        # Create multiple instances
-        bus1 = SignalInterface("CPU")
-        bus2 = SignalInterface("MEM")
-
-        # Connect them
-        Component(
-            name = "CPU",
-            type = "processor",
-            pin_defs = {"CLK": "1", "DATA": "2", "VALID": "3"},
-            footprint = "BGA:256",
-            pins = {
-                "CLK": bus1.clk,
-                "DATA": bus1.data,
-                "VALID": bus1.valid,
-            }
-        )
-
-        Component(
-            name = "MEM",
-            type = "memory",
-            pin_defs = {"CLK": "1", "DATA": "2", "VALID": "3"},
-            footprint = "TSOP:48",
-            pins = {
-                "CLK": bus2.clk,
-                "DATA": bus2.data,
-                "VALID": bus2.valid,
-            }
-        )
-    "#
-});
-
 snapshot_eval!(interface_mixed_templates_and_types, {
     "test.star" => r#"
         # Mix of templates and regular types
         MixedInterface = interface(
-            # Template nets with properties
-            power = Net("VDD", voltage="1.8V"),
-            ground = Net("VSS", type="ground"),
+            # Template nets without properties
+            power = Net("VDD"),
+            ground = Net("VSS"),
             # Regular net type
             signal = Net,
             # Nested interface template
             control = interface(
                 enable = Net("EN"),
-                reset = Net("RST", active="low")
+                reset = Net("RST")
             )()
         )
 

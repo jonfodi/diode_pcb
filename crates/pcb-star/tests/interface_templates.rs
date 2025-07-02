@@ -9,7 +9,7 @@ fn test_interface_with_net_template() {
         "test.star",
         r#"
 # Test interface with net template
-MyIf = interface(test = Net("MYTEST", prop=True))
+MyIf = interface(test = Net("MYTEST"))
 instance = MyIf("PREFIX")
 
 # Create component to use the net
@@ -46,8 +46,8 @@ fn test_interface_with_multiple_net_templates() {
         r#"
 # Test interface with multiple net templates
 Power = interface(
-    vcc = Net("3V3", voltage="3.3V", type="power"),
-    gnd = Net("GND", type="ground"),
+    vcc = Net("3V3"),
+    gnd = Net("GND"),
     enable = Net()  # Regular net type, not template
 )
 
@@ -102,8 +102,8 @@ fn test_interface_with_nested_interface_template() {
         r#"
 # Test nested interface templates
 PowerNets = interface(
-    vcc = Net("VCC", type="power"),
-    gnd = Net("GND", type="ground")
+    vcc = Net("VCC"),
+    gnd = Net("GND")
 )
 
 # Create a template instance
@@ -161,7 +161,7 @@ fn test_interface_template_without_name() {
         r#"
 # Test interface with unnamed net template
 MyIf = interface(
-    test = Net(prop1=True, prop2="value")  # No name specified
+    test = Net()  # No name specified
 )
 
 # Create instance without prefix

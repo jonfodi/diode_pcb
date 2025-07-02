@@ -1,5 +1,5 @@
 ---
-source: projects/cli/crates/diode_star_core/tests/input.rs
+source: crates/pcb-star-core/tests/input.rs
 expression: output
 ---
 Module {
@@ -43,22 +43,12 @@ Module {
                         Net {
                             name: "PORT1_POWER_GND",
                             id: "<ID>",
-                            properties: {
-                                "type": FrozenValue(
-                                    "ground",
-                                ),
-                            },
                         },
                     ),
                     "VBUS": FrozenValue(
                         Net {
                             name: "PORT1_POWER_VCC",
                             id: "<ID>",
-                            properties: {
-                                "type": FrozenValue(
-                                    "power",
-                                ),
-                            },
                         },
                     ),
                 },

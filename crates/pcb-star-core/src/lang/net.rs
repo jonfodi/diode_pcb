@@ -183,12 +183,9 @@ where
             None
         };
 
-        // Collect all keyword arguments as properties
-        let mut properties = SmallMap::new();
-        let names_map = args.names_map()?;
-
         // Check if "name" was provided as a kwarg
         let mut name_kwarg: Option<String> = None;
+        let names_map = args.names_map()?;
 
         for (key, value) in names_map.iter() {
             if key.as_str() == "name" {
@@ -204,8 +201,11 @@ where
                         .to_owned(),
                 );
             } else {
-                // All other kwargs become properties
-                properties.insert(key.as_str().to_owned(), value.to_value());
+                // No longer accept other kwargs as properties
+                return Err(starlark::Error::new_other(anyhow::anyhow!(
+                    "Net() does not accept keyword argument '{}'. Only 'name' is allowed.",
+                    key.as_str()
+                )));
             }
         }
 
@@ -223,6 +223,9 @@ where
         // Keep name empty when not supplied so that later passes can derive a context-aware
         // identifier from the net's connections.
         let net_name = name_pos.or(name_kwarg).unwrap_or_default();
+
+        // Initialize with empty properties map
+        let properties = SmallMap::new();
 
         Ok(heap.alloc(NetValue {
             id: net_id,

@@ -1,5 +1,5 @@
 ---
-source: projects/cli/crates/diode_star_core/tests/input.rs
+source: crates/pcb-star-core/tests/input.rs
 expression: output
 ---
 Module {
@@ -40,11 +40,6 @@ Module {
                         Net {
                             name: "CHIP_CONTROL_RST",
                             id: "<ID>",
-                            properties: {
-                                "active": FrozenValue(
-                                    "low",
-                                ),
-                            },
                         },
                     ),
                     "SIG": FrozenValue(
@@ -57,22 +52,12 @@ Module {
                         Net {
                             name: "CHIP_VDD",
                             id: "<ID>",
-                            properties: {
-                                "voltage": FrozenValue(
-                                    "1.8V",
-                                ),
-                            },
                         },
                     ),
                     "VSS": FrozenValue(
                         Net {
                             name: "CHIP_VSS",
                             id: "<ID>",
-                            properties: {
-                                "type": FrozenValue(
-                                    "ground",
-                                ),
-                            },
                         },
                     ),
                 },

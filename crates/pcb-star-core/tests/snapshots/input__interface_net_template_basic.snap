@@ -1,5 +1,5 @@
 ---
-source: projects/cli/crates/diode_star_core/tests/input.rs
+source: crates/pcb-star-core/tests/input.rs
 expression: output
 ---
 Module {
@@ -25,16 +25,6 @@ Module {
                         Net {
                             name: "PREFIX_MYTEST",
                             id: "<ID>",
-                            properties: {
-                                "prop": FrozenValue(
-                                    StarlarkBool(
-                                        true,
-                                    ),
-                                ),
-                                "value": FrozenValue(
-                                    "123",
-                                ),
-                            },
                         },
                     ),
                     "2": FrozenValue(

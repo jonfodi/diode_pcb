@@ -9,7 +9,7 @@ fn interface_net_template_basic() {
         "test.star",
         r#"
 # Basic interface with net template
-MyInterface = interface(test = Net("MYTEST", prop=True, value="123"))
+MyInterface = interface(test = Net("MYTEST"))
 instance = MyInterface("PREFIX")
 
 # Create component to generate netlist
@@ -35,9 +35,9 @@ fn interface_multiple_net_templates() {
         r#"
 # Interface with multiple net templates
 Power = interface(
-    vcc = Net("3V3", voltage="3.3V", type="power"),
-    gnd = Net("GND", type="ground"),
-    enable = Net("EN", active="high")
+    vcc = Net("3V3"),
+    gnd = Net("GND"),
+    enable = Net("EN")
 )
 
 # Create instances
@@ -83,8 +83,8 @@ fn interface_nested_template() {
         r#"
 # Nested interface templates
 PowerNets = interface(
-    vcc = Net("VCC", type="power"),
-    gnd = Net("GND", type="ground")
+    vcc = Net("VCC"),
+    gnd = Net("GND")
 )
 
 # Create a pre-configured power instance
@@ -126,11 +126,11 @@ fn interface_template_property_inheritance() {
     env.add_file(
         "test.star",
         r#"
-# Test that properties are properly copied from templates
+# Test that net names are properly copied from templates
 SignalInterface = interface(
-    clk = Net("CLK", frequency="100MHz", type="clock"),
-    data = Net("DATA", width="8", direction="bidirectional"),
-    valid = Net("VALID", active="high")
+    clk = Net("CLK"),
+    data = Net("DATA"),
+    valid = Net("VALID")
 )
 
 # Create multiple instances
@@ -176,15 +176,15 @@ fn interface_mixed_templates_and_types() {
         r#"
 # Mix of templates and regular types
 MixedInterface = interface(
-    # Template nets with properties
-    power = Net("VDD", voltage="1.8V"),
-    ground = Net("VSS", type="ground"),
+    # Template nets without properties
+    power = Net("VDD"),
+    ground = Net("VSS"),
     # Regular net type
     signal = Net,
     # Nested interface template
     control = interface(
         enable = Net("EN"),
-        reset = Net("RST", active="low")
+        reset = Net("RST")
     )()
 )
 
