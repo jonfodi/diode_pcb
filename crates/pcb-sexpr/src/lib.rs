@@ -38,12 +38,12 @@ impl Sexpr {
 
     /// Check if this is an atom (symbol or string)
     pub fn is_atom(&self) -> bool {
-        matches!(self, Sexpr::Symbol(_) | Sexpr::String(_))
+        self.as_atom().is_some()
     }
 
     /// Check if this is a list
     pub fn is_list(&self) -> bool {
-        matches!(self, Sexpr::List(_))
+        self.as_list().is_some()
     }
 
     /// Get the atom value if this is an atom (symbol or string)
