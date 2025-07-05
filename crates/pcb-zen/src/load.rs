@@ -19,6 +19,10 @@ pub(crate) const DEFAULT_PKG_TAG: &str = "latest";
 /// spec, e.g. `@github/user/repo/path.zen`.
 pub(crate) const DEFAULT_GITHUB_REV: &str = "HEAD";
 
+/// Default git revision that is assumed when the caller omits one in a GitLab
+/// spec, e.g. `@gitlab/user/repo/path.zen`.
+pub(crate) const DEFAULT_GITLAB_REV: &str = "HEAD";
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LoadSpec {
     Package {
@@ -29,6 +33,11 @@ pub enum LoadSpec {
     Github {
         user: String,
         repo: String,
+        rev: String,
+        path: PathBuf,
+    },
+    Gitlab {
+        project_path: String, // Can be "user/repo" or "group/subgroup/repo"
         rev: String,
         path: PathBuf,
     },
@@ -50,6 +59,22 @@ pub enum LoadSpec {
 ///   The `<rev>` component can be a branch name, tag, or a short/long commit
 ///   SHA (7–40 hexadecimal characters).
 ///   Example: `"@github/foo/bar:abc123/scripts/build.zen".
+///
+/// • **GitLab repository** –
+///   `"@gitlab/<user>/<repo>[:<rev>]/<path>"`.
+///   If `<rev>` is omitted the special value [`DEFAULT_GITLAB_REV`] (currently
+///   `"HEAD"`) is assumed.
+///   The `<rev>` component can be a branch name, tag, or a short/long commit
+///   SHA (7–40 hexadecimal characters).
+///   
+///   For nested groups, include the full path before the revision:
+///   `"@gitlab/group/subgroup/repo:rev/path"`.
+///   Without a revision, the first two path components are assumed to be the project path.
+///   
+///   Examples:
+///   - `"@gitlab/foo/bar:main/src/lib.zen"` - Simple user/repo with revision
+///   - `"@gitlab/foo/bar/src/lib.zen"` - Simple user/repo without revision (assumes HEAD)
+///   - `"@gitlab/kicad/libraries/kicad-symbols:main/Device.kicad_sym"` - Nested groups with revision
 ///
 /// The function does not touch the filesystem – it only performs syntactic
 /// parsing.
@@ -73,6 +98,51 @@ pub fn parse_load_spec(s: &str) -> Option<LoadSpec> {
             rev,
             path: PathBuf::from(remaining_path),
         })
+    } else if let Some(rest) = s.strip_prefix("@gitlab/") {
+        // GitLab: @gitlab/group/subgroup/repo:rev/path
+        // We need to find where the project path ends and the file path begins
+        // This is tricky because both can contain slashes
+
+        // First, check if there's a revision marker ':'
+        if let Some(colon_pos) = rest.find(':') {
+            // We have a revision specified
+            let project_part = &rest[..colon_pos];
+            let after_colon = &rest[colon_pos + 1..];
+
+            // Find the first slash after the colon to separate rev from path
+            if let Some(slash_pos) = after_colon.find('/') {
+                let rev = after_colon[..slash_pos].to_string();
+                let file_path = after_colon[slash_pos + 1..].to_string();
+
+                Some(LoadSpec::Gitlab {
+                    project_path: project_part.to_string(),
+                    rev,
+                    path: PathBuf::from(file_path),
+                })
+            } else {
+                // No file path after revision
+                Some(LoadSpec::Gitlab {
+                    project_path: project_part.to_string(),
+                    rev: after_colon.to_string(),
+                    path: PathBuf::new(),
+                })
+            }
+        } else {
+            // No revision specified, assume first 2 parts are the project path
+            let parts: Vec<&str> = rest.splitn(3, '/').collect();
+            if parts.len() >= 2 {
+                let project_path = format!("{}/{}", parts[0], parts[1]);
+                let file_path = parts.get(2).unwrap_or(&"").to_string();
+
+                Some(LoadSpec::Gitlab {
+                    project_path,
+                    rev: DEFAULT_GITLAB_REV.to_string(),
+                    path: PathBuf::from(file_path),
+                })
+            } else {
+                None
+            }
+        }
     } else if let Some(rest) = s.strip_prefix('@') {
         // Generic package: @<pkg>[:<tag>]/optional/path
         // rest looks like "pkg[:tag]/path..." or just "pkg"/"pkg:tag"
@@ -100,45 +170,45 @@ pub fn parse_load_spec(s: &str) -> Option<LoadSpec> {
 /// filesystem and return its absolute path.
 ///
 /// * **Local** specs are returned unchanged.
-/// * **Package** and **GitHub** specs are fetched (and cached) under the
+/// * **Package**, **GitHub**, and **GitLab** specs are fetched (and cached) under the
 ///   user's cache directory on first use. Subsequent invocations will reuse
 ///   the cached copy.
 ///
 /// The returned path is guaranteed to exist on success.
 pub fn materialise_load(spec: &LoadSpec, workspace_root: Option<&Path>) -> anyhow::Result<PathBuf> {
     if let LoadSpec::Package { package, tag, path } = spec {
-        if let Some(root) = workspace_root {
-            if let Some(target) = lookup_package_alias(root, package) {
-                // Build new load string by appending any extra path the caller asked for.
-                let mut new_spec_str = target.clone();
-                if !path.as_os_str().is_empty() {
-                    new_spec_str = format!(
-                        "{}/{}",
-                        new_spec_str.trim_end_matches('/'),
-                        path.to_string_lossy()
-                    );
-                }
+        // Check for package alias (workspace or default)
+        if let Some(target) = lookup_package_alias(workspace_root, package) {
+            // Build new load string by appending any extra path the caller asked for.
+            let mut new_spec_str = target.clone();
+            if !path.as_os_str().is_empty() {
+                new_spec_str = format!(
+                    "{}/{}",
+                    new_spec_str.trim_end_matches('/'),
+                    path.to_string_lossy()
+                );
+            }
 
-                // If caller explicitly specified a tag (non-default) we warn and ignore –
-                // alias definitions should embed the desired tag.
-                if tag != DEFAULT_PKG_TAG {
-                    log::debug!("ignoring tag '{tag}' on alias '{package}'");
-                }
+            // If caller explicitly specified a tag (non-default) we warn and ignore –
+            // alias definitions should embed the desired tag.
+            if tag != DEFAULT_PKG_TAG {
+                log::debug!("ignoring tag '{tag}' on alias '{package}'");
+            }
 
-                let new_spec = parse_load_spec(&new_spec_str).ok_or_else(|| {
-                    anyhow::anyhow!("Failed to parse load spec: {}", new_spec_str)
-                })?;
+            let new_spec = parse_load_spec(&new_spec_str)
+                .ok_or_else(|| anyhow::anyhow!("Failed to parse load spec: {}", new_spec_str))?;
 
-                // Recurse to resolve/load and obtain the concrete local path.
-                let resolved_path = materialise_load(&new_spec, workspace_root)?;
+            // Recurse to resolve/load and obtain the concrete local path.
+            let resolved_path = materialise_load(&new_spec, workspace_root)?;
 
-                // Attempt to expose in .pcb folder via symlink.
+            // Attempt to expose in .pcb folder via symlink if we have a workspace.
+            if let Some(root) = workspace_root {
                 if let Err(e) = expose_alias_symlink(root, package, path, &resolved_path) {
                     log::debug!("failed to create alias symlink: {e}");
                 }
-
-                return Ok(resolved_path);
             }
+
+            return Ok(resolved_path);
         }
         // No alias match – proceed with normal package handling below, but ensure we expose a symlink afterwards.
     }
@@ -209,12 +279,39 @@ pub fn materialise_load(spec: &LoadSpec, workspace_root: Option<&Path>) -> anyho
             }
             Ok(local_path)
         }
+        LoadSpec::Gitlab {
+            project_path,
+            rev,
+            path,
+        } => {
+            let cache_root = cache_dir()?.join("gitlab").join(project_path).join(rev);
+
+            // Ensure the repo has been fetched & unpacked.
+            if !cache_root.exists() {
+                download_and_unpack_gitlab_repo(project_path, rev, &cache_root)?;
+            }
+
+            let local_path = cache_root.join(path);
+            if !local_path.exists() {
+                anyhow::bail!(
+                    "Path {} not found inside cached GitLab repo",
+                    path.display()
+                );
+            }
+            if let Some(root) = workspace_root {
+                let folder_name = format!(
+                    "gitlab{}{}{}",
+                    std::path::MAIN_SEPARATOR,
+                    project_path,
+                    std::path::MAIN_SEPARATOR
+                );
+                let folder_name = format!("{folder_name}{rev}");
+                let _ = expose_alias_symlink(root, &folder_name, path, &local_path);
+            }
+            Ok(local_path)
+        }
     }
 }
-
-// ──────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────
 
 pub fn cache_dir() -> anyhow::Result<PathBuf> {
     // 1. Allow callers to force an explicit location via env var. This is handy in CI
@@ -258,7 +355,7 @@ fn download_and_unpack_github_repo(
     // Reject abbreviated commit hashes – we only support full 40-character SHAs or branch/tag names.
     if looks_like_git_sha(rev) && rev.len() < 40 {
         anyhow::bail!(
-            "Abbreviated commit hashes ({} characters) are not supported – please use the full 40-character commit SHA or a branch/tag name (got '{}').",
+            "Abbreviated commit hashes ({} characters) are not supported - please use the full 40-character commit SHA or a branch/tag name (got '{}').",
             rev.len(),
             rev
         );
@@ -430,6 +527,185 @@ fn download_and_unpack_github_repo(
     Ok(())
 }
 
+fn download_and_unpack_gitlab_repo(
+    project_path: &str,
+    rev: &str,
+    dest_dir: &Path,
+) -> anyhow::Result<()> {
+    log::info!("Fetching GitLab repo {project_path} @ {rev}");
+
+    // Reject abbreviated commit hashes – we only support full 40-character SHAs or branch/tag names.
+    if looks_like_git_sha(rev) && rev.len() < 40 {
+        anyhow::bail!(
+            "Abbreviated commit hashes ({} characters) are not supported – please use the full 40-character commit SHA or a branch/tag name (got '{}').",
+            rev.len(),
+            rev
+        );
+    }
+
+    let effective_rev = rev.to_string();
+
+    // Helper that attempts to clone via the system `git` binary. Returns true on
+    // success, false on failure (so we can fall back to other mechanisms).
+    let try_git_clone = |remote_url: &str| -> anyhow::Result<bool> {
+        // Ensure parent dirs exist so `git clone` can create `dest_dir`.
+        if let Some(parent) = dest_dir.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Build the basic clone command.
+        let mut cmd = Command::new("git");
+        cmd.arg("clone");
+        cmd.arg("--depth");
+        cmd.arg("1");
+        cmd.arg("--quiet"); // Suppress output
+
+        // Decide how to treat the requested revision.
+        let rev_is_head = effective_rev.eq_ignore_ascii_case("HEAD");
+        let rev_is_sha = looks_like_git_sha(&effective_rev);
+
+        // For branch or tag names we can use the efficient `--branch <name>` clone.
+        // For commit SHAs we first perform a regular shallow clone of the default branch
+        // and then fetch & checkout the desired commit afterwards.
+        if !rev_is_head && !rev_is_sha {
+            cmd.arg("--branch");
+            cmd.arg(&effective_rev);
+            cmd.arg("--single-branch");
+        }
+
+        cmd.arg(remote_url);
+        cmd.arg(dest_dir);
+
+        // Silence all output
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+
+        log::debug!("Running command: {cmd:?}");
+        match cmd.status() {
+            Ok(status) if status.success() => {
+                if rev_is_head {
+                    // Nothing to do – HEAD already checked out.
+                    return Ok(true);
+                }
+
+                if rev_is_sha {
+                    // Fetch the specific commit (shallow) and check it out.
+                    let fetch_ok = Command::new("git")
+                        .arg("-C")
+                        .arg(dest_dir)
+                        .arg("fetch")
+                        .arg("--quiet")
+                        .arg("--depth")
+                        .arg("1")
+                        .arg("origin")
+                        .arg(&effective_rev)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+
+                    if !fetch_ok {
+                        return Ok(false);
+                    }
+                }
+
+                // Detach checkout for both commit SHAs and branch/tag when we didn't use --branch.
+                let checkout_ok = Command::new("git")
+                    .arg("-C")
+                    .arg(dest_dir)
+                    .arg("checkout")
+                    .arg("--quiet")
+                    .arg(&effective_rev)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+
+                if checkout_ok {
+                    return Ok(true);
+                }
+
+                // Fall through – treat as failure so other strategies can try.
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
+    };
+
+    // Strategy 1: system git with HTTPS (respects credential helpers).
+    let https_url = format!("https://gitlab.com/{project_path}.git");
+    if git_is_available() && try_git_clone(&https_url)? {
+        return Ok(());
+    }
+
+    // Strategy 2: system git with SSH.
+    let ssh_url = format!("git@gitlab.com:{project_path}.git");
+    if git_is_available() && try_git_clone(&ssh_url)? {
+        return Ok(());
+    }
+
+    // Strategy 3: fall back to unauthenticated or token-authenticated archive tarball.
+    // GitLab's archive API: https://gitlab.com/api/v4/projects/{id}/repository/archive?sha={rev}
+    // We need to URL-encode the project path (user/repo) for the API
+    let encoded_project_path = project_path.replace("/", "%2F");
+    let url = format!("https://gitlab.com/api/v4/projects/{encoded_project_path}/repository/archive.tar.gz?sha={effective_rev}");
+
+    // Build a reqwest client so we can attach an Authorization header when needed
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("diode-star-loader")
+        .build()?;
+
+    // Allow users to pass a token for private repositories via env var.
+    let token = std::env::var("DIODE_GITLAB_TOKEN")
+        .or_else(|_| std::env::var("GITLAB_TOKEN"))
+        .ok();
+
+    let mut request = client.get(&url);
+    if let Some(t) = token.as_ref() {
+        // GitLab uses a different header format
+        request = request.header("PRIVATE-TOKEN", t);
+    }
+
+    let resp = request.send()?;
+    if !resp.status().is_success() {
+        let code = resp.status();
+        if code == reqwest::StatusCode::NOT_FOUND || code == reqwest::StatusCode::UNAUTHORIZED {
+            anyhow::bail!(
+                "Failed to download GitLab repo {project_path} at {rev} (HTTP {code}).\n\
+                 Tried clones via HTTPS & SSH, then archive download.\n\
+                 If this repository is private please set an access token in the `GITLAB_TOKEN` environment variable."
+            );
+        } else {
+            anyhow::bail!(
+                "Failed to download repo archive {url} (HTTP {code}) after trying git clone."
+            );
+        }
+    }
+    let bytes = resp.bytes()?;
+
+    // Decompress tar.gz in-memory.
+    let gz = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
+    let mut archive = tar::Archive::new(gz);
+
+    // The tarball contains a single top-level directory like <repo>-<rev>-<hash>/...
+    // We extract its contents into dest_dir while stripping the first component.
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?;
+        let mut comps = path.components();
+        comps.next(); // strip top-level folder
+        let stripped: PathBuf = comps.as_path().to_path_buf();
+        let out_path = dest_dir.join(stripped);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        entry.unpack(&out_path)?;
+    }
+    Ok(())
+}
+
 // Simple helper that checks whether the `git` executable is available on PATH.
 fn git_is_available() -> bool {
     Command::new("git")
@@ -463,6 +739,20 @@ pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 
 // Package alias helpers
 
+/// Default package aliases that are always available
+fn default_package_aliases() -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    map.insert(
+        "kicad-symbols".to_string(),
+        "@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string(),
+    );
+    map.insert(
+        "stdlib".to_string(),
+        "@github/diodeinc/stdlib:HEAD".to_string(),
+    );
+    map
+}
+
 /// Thread-safe cache: workspace root → alias map.
 static ALIAS_CACHE: Lazy<
     Mutex<std::collections::HashMap<PathBuf, std::collections::HashMap<String, String>>>,
@@ -475,7 +765,9 @@ fn package_aliases(root: &Path) -> std::collections::HashMap<String, String> {
         return map.clone();
     }
 
-    let mut map = std::collections::HashMap::new();
+    // Start with default aliases
+    let mut map = default_package_aliases();
+
     let toml_path = root.join("pcb.toml");
     if let Ok(contents) = std::fs::read_to_string(&toml_path) {
         // Deserialize only the [packages] table to avoid large structs.
@@ -486,7 +778,8 @@ fn package_aliases(root: &Path) -> std::collections::HashMap<String, String> {
 
         if let Ok(parsed) = toml::from_str::<PkgRoot>(&contents) {
             if let Some(pkgs) = parsed.packages {
-                map = pkgs;
+                // User's aliases override defaults
+                map.extend(pkgs);
             }
         }
     }
@@ -495,9 +788,14 @@ fn package_aliases(root: &Path) -> std::collections::HashMap<String, String> {
     map
 }
 
-/// Look up an alias (package name) in workspace root. Returns mapped string if present.
-fn lookup_package_alias(root: &Path, alias: &str) -> Option<String> {
-    package_aliases(root).get(alias).cloned()
+/// Look up an alias (package name). Returns mapped string if present.
+/// If root is None, only checks default aliases.
+/// If root is Some, checks workspace aliases (which include defaults).
+fn lookup_package_alias(root: Option<&Path>, alias: &str) -> Option<String> {
+    match root {
+        Some(r) => package_aliases(r).get(alias).cloned(),
+        None => default_package_aliases().get(alias).cloned(),
+    }
 }
 
 // Create a symlink inside `<workspace>/.pcb/<alias>/<sub_path>` pointing to `target`.
@@ -636,6 +934,100 @@ mod tests {
     }
 
     #[test]
+    fn parses_gitlab_with_rev_and_path() {
+        let spec = parse_load_spec("@gitlab/foo/bar:abc123/scripts/build.zen");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "foo/bar".to_string(),
+                rev: "abc123".to_string(),
+                path: PathBuf::from("scripts/build.zen"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_without_rev() {
+        let spec = parse_load_spec("@gitlab/foo/bar/scripts/build.zen");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "foo/bar".to_string(),
+                rev: DEFAULT_GITLAB_REV.to_string(),
+                path: PathBuf::from("scripts/build.zen"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_repo_root_with_rev() {
+        let spec = parse_load_spec("@gitlab/foo/bar:main");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "foo/bar".to_string(),
+                rev: "main".to_string(),
+                path: PathBuf::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_repo_root_with_long_commit() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let input = format!("@gitlab/foo/bar:{sha}");
+        let spec = parse_load_spec(&input);
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "foo/bar".to_string(),
+                rev: sha.to_string(),
+                path: PathBuf::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_nested_groups_with_rev() {
+        let spec = parse_load_spec("@gitlab/kicad/libraries/kicad-symbols:main/Device.kicad_sym");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "kicad/libraries/kicad-symbols".to_string(),
+                rev: "main".to_string(),
+                path: PathBuf::from("Device.kicad_sym"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_simple_without_rev_with_file_path() {
+        // Without revision, first 2 parts are project
+        let spec = parse_load_spec("@gitlab/user/repo/src/main.zen");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "user/repo".to_string(),
+                rev: DEFAULT_GITLAB_REV.to_string(),
+                path: PathBuf::from("src/main.zen"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_nested_groups_no_file() {
+        let spec = parse_load_spec("@gitlab/kicad/libraries/kicad-symbols:v7.0.0");
+        assert_eq!(
+            spec,
+            Some(LoadSpec::Gitlab {
+                project_path: "kicad/libraries/kicad-symbols".to_string(),
+                rev: "v7.0.0".to_string(),
+                path: PathBuf::new(),
+            })
+        );
+    }
+
+    #[test]
     #[ignore]
     fn downloads_github_repo_by_commit_tarball() {
         // This test performs a real network request to GitHub. It is ignored by default and
@@ -662,6 +1054,77 @@ mod tests {
             readme_exists,
             "expected README file to exist in extracted repo"
         );
+    }
+
+    #[test]
+    fn default_package_aliases() {
+        use tempfile::tempdir;
+
+        // Test 1: Default aliases work without pcb.toml
+        let temp_dir = tempdir().unwrap();
+        let aliases = package_aliases(temp_dir.path());
+
+        assert_eq!(
+            aliases.get("kicad-symbols"),
+            Some(&"@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string())
+        );
+        assert_eq!(
+            aliases.get("stdlib"),
+            Some(&"@github/diodeinc/stdlib:HEAD".to_string())
+        );
+
+        // Test 2: User can override defaults in pcb.toml
+        let pcb_toml = temp_dir.path().join("pcb.toml");
+        std::fs::write(
+            &pcb_toml,
+            r#"
+[packages]
+kicad-symbols = "@gitlab/kicad/libraries/kicad-symbols:7.0.0"
+custom = "@github/myuser/myrepo:main"
+"#,
+        )
+        .unwrap();
+
+        // Clear cache to force reload
+        ALIAS_CACHE.lock().unwrap().clear();
+
+        let aliases = package_aliases(temp_dir.path());
+
+        // User's version overrides default
+        assert_eq!(
+            aliases.get("kicad-symbols"),
+            Some(&"@gitlab/kicad/libraries/kicad-symbols:7.0.0".to_string())
+        );
+        // Default still present
+        assert_eq!(
+            aliases.get("stdlib"),
+            Some(&"@github/diodeinc/stdlib:HEAD".to_string())
+        );
+        // Custom alias added
+        assert_eq!(
+            aliases.get("custom"),
+            Some(&"@github/myuser/myrepo:main".to_string())
+        );
+    }
+
+    #[test]
+    fn default_aliases_without_workspace() {
+        // Test that default aliases work even without a workspace
+
+        // Test kicad-symbols alias
+        assert_eq!(
+            lookup_package_alias(None, "kicad-symbols"),
+            Some("@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string())
+        );
+
+        // Test stdlib alias
+        assert_eq!(
+            lookup_package_alias(None, "stdlib"),
+            Some("@github/diodeinc/stdlib:HEAD".to_string())
+        );
+
+        // Test non-existent alias
+        assert_eq!(lookup_package_alias(None, "nonexistent"), None);
     }
 }
 
