@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use pcb_zen_core::bundle::{Bundle, BundleManifest};
 use pcb_zen_core::{
     CompoundLoadResolver, DefaultFileProvider, EvalContext, FileProvider, InputMap, LoadResolver,
-    WorkspaceLoadResolver,
+    RelativeLoadResolver, WorkspaceLoadResolver,
 };
 use zip::write::FileOptions;
 use zip::ZipWriter;
@@ -139,11 +139,14 @@ impl LoadResolver for BundleTrackingResolver {
             let mut load_map = self.load_map.lock().unwrap();
 
             // Use the bundle-relative path of the current file as the key
-            let current_file_key = current_file_bundle_path.to_string_lossy().into_owned();
+            // Always use forward slashes for cross-platform compatibility
+            let current_file_key = current_file_bundle_path
+                .to_string_lossy()
+                .replace('\\', "/");
 
             load_map.entry(current_file_key).or_default().insert(
                 load_path.to_string(),
-                bundle_path.to_string_lossy().into_owned(),
+                bundle_path.to_string_lossy().replace('\\', "/"),
             );
         }
 
@@ -225,6 +228,10 @@ pub fn create_bundle(input_path: &Path, output_path: &Path) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Input file has no parent directory"))?
         .to_path_buf();
 
+    // Find the workspace root by looking for pcb.toml, fall back to source dir if not found
+    let workspace_root =
+        crate::load::find_workspace_root(&canonical_input).unwrap_or_else(|| source_dir.clone());
+
     // Create a temporary directory for the bundle
     let temp_dir = tempfile::tempdir()?;
     let bundle_dir = temp_dir.path().to_path_buf();
@@ -243,11 +250,11 @@ pub fn create_bundle(input_path: &Path, output_path: &Path) -> Result<()> {
         .unwrap()
         .to_path_buf();
 
-    // Create the base load resolver and file provider
-    let workspace_root = source_dir.to_path_buf();
+    // Create the base load resolver and file provider with the correct workspace root
     let base_resolver = Arc::new(CompoundLoadResolver::new(vec![
         Arc::new(RemoteLoadResolver),
         Arc::new(WorkspaceLoadResolver::new(workspace_root)),
+        Arc::new(RelativeLoadResolver),
     ]));
     let file_provider = Arc::new(DefaultFileProvider);
 
@@ -328,7 +335,8 @@ fn add_directory_to_zip<W: Write + std::io::Seek>(
             add_directory_to_zip(zip, &path, base_dir)?;
         } else {
             // Add file to zip
-            let file_name = relative_path.to_string_lossy();
+            // Always use forward slashes in ZIP archives (ZIP standard)
+            let file_name = relative_path.to_string_lossy().replace('\\', "/");
             zip.start_file(file_name, FileOptions::<()>::default())?;
 
             let mut file = File::open(&path)?;
