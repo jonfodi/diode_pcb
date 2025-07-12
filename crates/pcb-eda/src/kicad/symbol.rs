@@ -1,35 +1,46 @@
 use crate::{Part, Pin, Symbol};
 use anyhow::Result;
-use sexp::{parse, Atom, Sexp};
+use pcb_sexpr::{parse, Sexpr};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct KicadSymbol {
-    name: String,
-    footprint: String,
-    in_bom: bool,
-    pins: Vec<KicadPin>,
-    mpn: Option<String>,
-    manufacturer: Option<String>,
-    datasheet_url: Option<String>,
-    description: Option<String>,
-    distributors: HashMap<String, Part>,
-    properties: HashMap<String, String>,
+    pub(super) name: String,
+    pub(super) extends: Option<String>,
+    pub(super) footprint: String,
+    pub(super) in_bom: bool,
+    pub(super) pins: Vec<KicadPin>,
+    pub(super) mpn: Option<String>,
+    pub(super) manufacturer: Option<String>,
+    pub(super) datasheet_url: Option<String>,
+    pub(super) description: Option<String>,
+    pub(super) distributors: HashMap<String, Part>,
+    pub(super) properties: HashMap<String, String>,
+    pub(super) raw_sexp: Option<Sexpr>,
 }
 
 impl KicadSymbol {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    pub fn extends(&self) -> Option<&str> {
+        self.extends.as_deref()
+    }
+
+    pub fn raw_sexp(&self) -> Option<&Sexpr> {
+        self.raw_sexp.as_ref()
+    }
 }
 
-#[derive(Debug, Default)]
-struct KicadPin {
-    name: String,
-    number: String,
+#[derive(Debug, Default, Clone, Serialize)]
+pub(super) struct KicadPin {
+    pub(super) name: String,
+    pub(super) number: String,
 }
 
 impl From<KicadSymbol> for Symbol {
@@ -52,6 +63,7 @@ impl From<KicadSymbol> for Symbol {
                     number: pin.number,
                 })
                 .collect(),
+            raw_sexp: symbol.raw_sexp,
         }
     }
 }
@@ -64,11 +76,11 @@ impl FromStr for KicadSymbol {
 
         // Find the 'symbol' S-expression
         let symbol_sexp = match sexp {
-            Sexp::List(kicad_symbol_lib) => kicad_symbol_lib
+            Sexpr::List(kicad_symbol_lib) => kicad_symbol_lib
                 .into_iter()
                 .find_map(|item| match item {
-                    Sexp::List(ref symbol_list) => match symbol_list.first() {
-                        Some(Sexp::Atom(Atom::S(ref sym))) if sym == "symbol" => {
+                    Sexpr::List(ref symbol_list) => match symbol_list.first() {
+                        Some(Sexpr::Symbol(ref sym)) if sym == "symbol" => {
                             Some(symbol_list.clone())
                         }
                         _ => None,
@@ -90,25 +102,33 @@ impl KicadSymbol {
     }
 }
 
-pub(super) fn parse_symbol(symbol_data: &[Sexp]) -> Result<KicadSymbol> {
+pub(super) fn parse_symbol(symbol_data: &[Sexpr]) -> Result<KicadSymbol> {
     // Extract the symbol name
     let name = symbol_data
         .get(1)
         .and_then(|sexp| match sexp {
-            Sexp::Atom(Atom::S(name)) => Some(name.clone()),
+            Sexpr::Symbol(name) | Sexpr::String(name) => Some(name.clone()),
             _ => None,
         })
         .ok_or(anyhow::anyhow!("Symbol name not found"))?;
 
     let mut symbol = KicadSymbol {
         name,
+        raw_sexp: Some(Sexpr::List(symbol_data.to_vec())),
         ..Default::default()
     };
 
     for prop in &symbol_data[2..] {
-        if let Sexp::List(prop_list) = prop {
-            if let Some(Sexp::Atom(Atom::S(prop_name))) = prop_list.first() {
+        if let Sexpr::List(prop_list) = prop {
+            if let Some(Sexpr::Symbol(prop_name)) = prop_list.first() {
                 match prop_name.as_str() {
+                    "extends" => {
+                        if let Some(Sexpr::Symbol(parent_name) | Sexpr::String(parent_name)) =
+                            prop_list.get(1)
+                        {
+                            symbol.extends = Some(parent_name.clone());
+                        }
+                    }
                     "in_bom" => parse_in_bom(&mut symbol, prop_list),
                     "property" => parse_property(&mut symbol, prop_list),
                     "pin" => {
@@ -130,10 +150,10 @@ pub(super) fn parse_symbol(symbol_data: &[Sexp]) -> Result<KicadSymbol> {
 }
 
 // New function to parse the nested symbol section which contains pins in new format
-fn parse_symbol_section(symbol: &mut KicadSymbol, section_data: &[Sexp]) {
+fn parse_symbol_section(symbol: &mut KicadSymbol, section_data: &[Sexpr]) {
     for item in section_data {
-        if let Sexp::List(pin_data) = item {
-            if let Some(Sexp::Atom(Atom::S(type_name))) = pin_data.first() {
+        if let Sexpr::List(pin_data) = item {
+            if let Some(Sexpr::Symbol(type_name)) = pin_data.first() {
                 if type_name == "pin" {
                     if let Some(pin) = parse_pin_from_section(pin_data) {
                         symbol.pins.push(pin);
@@ -145,21 +165,21 @@ fn parse_symbol_section(symbol: &mut KicadSymbol, section_data: &[Sexp]) {
 }
 
 // New function to parse pins from the nested symbol section
-fn parse_pin_from_section(pin_data: &[Sexp]) -> Option<KicadPin> {
+fn parse_pin_from_section(pin_data: &[Sexpr]) -> Option<KicadPin> {
     // Format: (pin unspecified line (at X Y Z) (length L) (name "Name") (number "N"))
     let mut pin = KicadPin::default();
 
     // Extract name and number from the pin data
     for item in pin_data {
-        if let Sexp::List(attr_data) = item {
+        if let Sexpr::List(attr_data) = item {
             if attr_data.len() >= 2 {
-                if let Some(Sexp::Atom(Atom::S(attr_name))) = attr_data.first() {
+                if let Some(Sexpr::Symbol(attr_name)) = attr_data.first() {
                     if attr_name == "name" && attr_data.len() >= 2 {
-                        if let Some(Sexp::Atom(Atom::S(name))) = attr_data.get(1) {
+                        if let Some(Sexpr::String(name)) = attr_data.get(1) {
                             pin.name = name.clone();
                         }
                     } else if attr_name == "number" && attr_data.len() >= 2 {
-                        if let Some(Sexp::Atom(Atom::S(number))) = attr_data.get(1) {
+                        if let Some(Sexpr::String(number)) = attr_data.get(1) {
                             pin.number = number.clone();
                         }
                     }
@@ -176,16 +196,18 @@ fn parse_pin_from_section(pin_data: &[Sexp]) -> Option<KicadPin> {
     }
 }
 
-fn parse_in_bom(symbol: &mut KicadSymbol, prop_list: &[Sexp]) {
+fn parse_in_bom(symbol: &mut KicadSymbol, prop_list: &[Sexpr]) {
     symbol.in_bom = prop_list
         .get(1)
-        .map(|v| matches!(v, Sexp::Atom(Atom::S(ref s)) if s == "yes"))
+        .map(|v| matches!(v, Sexpr::Symbol(ref s) if s == "yes"))
         .unwrap_or(false);
 }
 
-fn parse_property(symbol: &mut KicadSymbol, prop_list: &[Sexp]) {
-    if let (Some(Sexp::Atom(Atom::S(key))), Some(Sexp::Atom(Atom::S(value)))) =
-        (prop_list.get(1), prop_list.get(2))
+fn parse_property(symbol: &mut KicadSymbol, prop_list: &[Sexpr]) {
+    if let (
+        Some(Sexpr::Symbol(key) | Sexpr::String(key)),
+        Some(Sexpr::Symbol(value) | Sexpr::String(value)),
+    ) = (prop_list.get(1), prop_list.get(2))
     {
         match key.as_str() {
             "Footprint" => {
@@ -236,12 +258,12 @@ fn parse_property(symbol: &mut KicadSymbol, prop_list: &[Sexp]) {
     }
 }
 
-fn parse_pin(pin_list: &[Sexp]) -> Option<KicadPin> {
+fn parse_pin(pin_list: &[Sexpr]) -> Option<KicadPin> {
     let mut pin = KicadPin::default();
 
     for item in pin_list {
-        if let Sexp::List(prop_list) = item {
-            if let (Some(Sexp::Atom(Atom::S(prop_name))), Some(Sexp::Atom(Atom::S(value)))) =
+        if let Sexpr::List(prop_list) = item {
+            if let (Some(Sexpr::Symbol(prop_name)), Some(Sexpr::String(value))) =
                 (prop_list.first(), prop_list.get(1))
             {
                 match prop_name.as_str() {

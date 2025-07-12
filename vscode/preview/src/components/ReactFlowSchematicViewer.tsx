@@ -19,22 +19,53 @@ import {
   useOnSelectionChange,
   ReactFlowProvider,
   Panel,
+  Background,
+  BackgroundVariant,
 } from "@xyflow/react";
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   NodeType,
-  SchematicRenderer,
+  SchematicLayoutEngine,
   DEFAULT_CONFIG,
-  NetReferenceType,
-} from "../renderer";
-import type { ElkEdge, ElkGraph, ElkNode, SchematicConfig } from "../renderer";
-import { PDFSchematicRenderer } from "../PDFSchematicRenderer";
+} from "../LayoutEngine";
+import type {
+  ElkEdge,
+  ElkNode,
+  SchematicConfig,
+  NodePositions,
+} from "../LayoutEngine";
+// import { PDFSchematicRenderer } from "../PDFSchematicRenderer";
 import type { Netlist } from "../types/NetlistTypes";
 import { debounce } from "lodash";
-import { Download, Loader, Settings } from "react-feather";
-import { renderKicadSymbol, getKicadSymbolInfo } from "../renderer/kicad_sym";
-import { Color } from "kicanvas/base/color";
+import { Settings } from "react-feather";
+import {
+  renderKicadSymbol,
+  getKicadSymbolInfo,
+  DEFAULT_THEME,
+  SELECTED_THEME,
+} from "../renderer/kicad_sym";
+import {
+  renderGlobalLabel,
+  type LabelDirection,
+} from "../renderer/kicad_global_label";
+// import { Color } from "../third_party/kicanvas/base/color";
+
+// Utility function for grid snapping
+function snapToGrid(value: number, gridSize: number): number {
+  return Math.round(value / gridSize) * gridSize;
+}
+
+function snapPosition(
+  x: number,
+  y: number,
+  gridSize: number
+): { x: number; y: number } {
+  return {
+    x: snapToGrid(x, gridSize),
+    y: snapToGrid(y, gridSize),
+  };
+}
 
 type SelectionState = {
   selectedNetId: string | null;
@@ -58,6 +89,7 @@ function createSchematicNode(
   selectionState: SelectionState,
   netlist?: Netlist
 ): SchematicNode {
+  // Note: positions should already be snapped by the layout engine
   return {
     id: elkNode.id,
     data: {
@@ -65,19 +97,21 @@ function createSchematicNode(
       selectionState,
       ...elkNode,
       ...(elkNode.type === NodeType.SYMBOL && netlist ? { netlist } : {}),
+      // Ensure rotation is included in data
+      rotation: elkNode.rotation || 0,
     },
     position: { x: elkNode.x || 0, y: elkNode.y || 0 },
     type: elkNode.type,
-    draggable: false,
-    // Only make modules selectable
-    selectable: elkNode.type === NodeType.MODULE,
+    draggable: true,
+    // Make all nodes selectable so they can be rotated
+    selectable: true,
     connectable: false,
     // Add custom styles based on node type
     style: {
       // Prevent hover effects on component nodes
       ...(elkNode.type === NodeType.COMPONENT
         ? {
-            cursor: "default",
+            cursor: "move",
             // Add some !important styles but NOT transform
             backgroundColor: "#f5f5f5 !important",
             border: "1px solid #ddd !important",
@@ -87,9 +121,7 @@ function createSchematicNode(
     },
     // Add class for additional styling with CSS
     className:
-      elkNode.type === NodeType.MODULE
-        ? "module-node"
-        : "component-node non-interactive",
+      elkNode.type === NodeType.MODULE ? "module-node" : "component-node",
   };
 }
 
@@ -109,16 +141,21 @@ function createSchematicEdge(
 }
 
 // Common color for electrical components
-const electricalComponentColor = "var(--vscode-editor-foreground, #666)";
-const edgeColor = "var(--vscode-editorLineNumber-dimmedForeground, #666)";
-const accentColor = "var(--vscode-activityBarBadge-background, #666)";
+// const electricalComponentColor = "var(--vscode-editor-foreground, #666)";
+// const edgeColor = "var(--vscode-editorLineNumber-dimmedForeground, #666)";
+// const accentColor = "var(--vscode-activityBarBadge-background, #666)";
+const electricalComponentColor = DEFAULT_THEME.component_outline.to_css();
+const edgeColor = DEFAULT_THEME.wire.to_css();
+const accentColor = DEFAULT_THEME.sheet_fields.to_css();
+const backgroundColor = DEFAULT_THEME.background.to_css();
+const labelColor = DEFAULT_THEME.reference.to_css();
 
 // Common CSS to override ReactFlow default hover effects
 const customStyles = `
-  /* Use VSCode theme colors for nodes and edges with fallbacks */
+  /* Use KiCad theme colors for nodes and edges */
   .react-flow__node {
-    color: var(--vscode-foreground, #000);
-    border-color: var(--vscode-editor-selectionBackground, #666);
+    color: ${labelColor};
+    border-color: ${electricalComponentColor};
   }
 
   /* Add transition for smooth layout changes */
@@ -140,35 +177,37 @@ const customStyles = `
 
   /* Style the graph background */
   .react-flow {
-    background-color: var(--vscode-editor-background, #fff);
+    background-color: ${backgroundColor};
   }
 
-  /* Disable hover effects for component nodes */
-  .react-flow__node-componentNode {
-    pointer-events: none !important;
+  /* Component nodes are now draggable */
+  .react-flow__node-component {
+    cursor: move !important;
   }
   
-  .react-flow__node-componentNode .component-port {
+  .react-flow__node-component .component-port {
     pointer-events: auto !important;
   }
   
-  /* Prevent hover color change for component nodes */
-  .react-flow__node-componentNode:hover {
-    background-color: var(--vscode-editor-background, #f5f5f5) !important;
-    border-color: ${edgeColor} !important;
-    box-shadow: none !important;
-    cursor: default !important;
+  /* Hover effect for draggable nodes */
+  .react-flow__node:hover {
+    cursor: move !important;
   }
   
-  /* Keep module nodes interactive */
-  .react-flow__node-moduleNode {
-    cursor: pointer;
+  /* Keep module nodes interactive with both drag and click */
+  .react-flow__node-module {
+    cursor: move;
   }
 
   /* Module node hover state */
-  .react-flow__node-moduleNode:hover {
-    border-color: var(--vscode-focusBorder, #0066cc) !important;
-    box-shadow: 0 0 0 2px var(--vscode-focusBorder, #0066cc) !important;
+  .react-flow__node-module:hover {
+    border-color: ${accentColor} !important;
+    box-shadow: 0 0 0 2px ${accentColor} !important;
+  }
+  
+  /* Show different cursor when dragging */
+  .react-flow__node.dragging {
+    cursor: grabbing !important;
   }
   
   /* Make sure the port connection points remain interactive */
@@ -178,23 +217,28 @@ const customStyles = `
 
   /* Style the minimap */
   .react-flow__minimap {
-    background-color: var(--vscode-editor-background, #fff);
+    background-color: ${backgroundColor};
   }
 
   /* Style the controls */
   .react-flow__controls {
-    background-color: var(--vscode-editor-background, #fff);
-    border-color: var(--vscode-editor-selectionBackground, #666);
+    background-color: ${backgroundColor};
+    border-color: ${electricalComponentColor};
   }
 
   .react-flow__controls button {
-    background-color: var(--vscode-button-background, #0066cc);
-    color: var(--vscode-button-foreground, #fff);
-    border-color: var(--vscode-button-border, transparent);
+    background-color: ${backgroundColor};
+    color: ${electricalComponentColor};
+    border-color: ${electricalComponentColor};
   }
 
   .react-flow__controls button:hover {
-    background-color: var(--vscode-button-hoverBackground, #0052a3);
+    background-color: ${electricalComponentColor};
+    color: ${backgroundColor};
+  }
+
+  .react-flow__controls button svg {
+    stroke: currentColor;
   }
 
   /* Style port labels */
@@ -210,19 +254,25 @@ const customStyles = `
     font-weight: 600;
   }
 
+  /* Disable outline on symbol nodes when selected */
+  .react-flow__node-symbol.selected {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
   /* Style the download button */
   .download-button {
     display: flex;
     align-items: center;
     gap: 8px;
-    background-color: var(--vscode-button-background, #0066cc);
-    color: var(--vscode-button-foreground, #fff);
-    border: 1px solid var(--vscode-button-border, transparent);
+    background-color: ${backgroundColor};
+    color: ${electricalComponentColor};
+    border: 1px solid ${electricalComponentColor};
     padding: 8px 12px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s, color 0.2s;
   }
 
   .download-button:disabled {
@@ -231,11 +281,14 @@ const customStyles = `
   }
 
   .download-button:not(:disabled):hover {
-    background-color: var(--vscode-button-hoverBackground, #0052a3);
+    background-color: ${electricalComponentColor};
+    color: ${backgroundColor};
   }
 
   .download-button:active {
-    background-color: var(--vscode-button-activeBackground, #004080);
+    background-color: ${electricalComponentColor};
+    color: ${backgroundColor};
+    opacity: 0.8;
   }
 
   .download-button svg {
@@ -297,18 +350,24 @@ const ModuleNode = ({ data }: { data: SchematicNodeData }) => {
     return isPortHighlighted ? 1 : 0.2;
   };
 
+  // Get rotation from data
+  const rotation = data.rotation || 0;
+
   // Different styles for modules vs components
   const nodeStyle: CSSProperties = {
     width: data.width,
     height: data.height,
     backgroundColor: isModule
-      ? "var(--vscode-editor-background, #fff)"
-      : `color-mix(in srgb, var(--vscode-editorLineNumber-foreground, #666) 5%, var(--vscode-editor-background, #fff))`,
+      ? backgroundColor
+      : `color-mix(in srgb, ${electricalComponentColor} 5%, ${backgroundColor})`,
     border: `1px solid ${electricalComponentColor}`,
     opacity: moduleOpacity,
-    cursor: isModule ? "pointer" : "default",
-    pointerEvents: isModule ? "auto" : "none",
+    cursor: "move",
+    pointerEvents: "auto",
     borderRadius: "0px",
+    // Apply rotation transform
+    transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+    transformOrigin: "center",
   };
 
   return (
@@ -328,7 +387,7 @@ const ModuleNode = ({ data }: { data: SchematicNodeData }) => {
             padding: "4px",
             fontSize: "12px",
             fontWeight: "bold",
-            color: "var(--vscode-foreground, #000)",
+            color: labelColor,
             textAlign: label.textAlign || "left",
             width: label.width || "auto",
           }}
@@ -448,9 +507,11 @@ const ModuleNode = ({ data }: { data: SchematicNodeData }) => {
                   />
 
                   {/* Port label */}
-                  <div className="port-label" style={labelStyle}>
-                    {port.labels?.[0]?.text}
-                  </div>
+                  {port.labels && port.labels.length > 0 && (
+                    <div className="port-label" style={labelStyle}>
+                      {port.labels[0].text}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -965,8 +1026,10 @@ const InductorNode = ({ data }: { data: SchematicNodeData }) => {
 
 // Define a node specifically for net references with an open circle symbol or ground/VDD symbol
 const NetReferenceNode = ({ data }: { data: SchematicNodeData }) => {
-  const isGround = data.netReferenceType === NetReferenceType.GROUND;
-  const isVdd = data.netReferenceType === NetReferenceType.VDD;
+  // const isGround = data.netReferenceType === NetReferenceType.GROUND;
+  // const isVdd = data.netReferenceType === NetReferenceType.VDD;
+  const isGround = false;
+  const isVdd = false;
 
   // Use fixed size for circle, ground, and VDD symbols
   const circleRadius = 3;
@@ -1168,8 +1231,23 @@ const NetReferenceNode = ({ data }: { data: SchematicNodeData }) => {
   );
 };
 
-// Define a node specifically for net junctions - invisible in the final rendering
+// Define a node specifically for net junctions - a small dot at wire intersections
 const NetJunctionNode = ({ data }: { data: SchematicNodeData }) => {
+  // Determine if this node should be dimmed based on selection state
+  const selectionState = data.selectionState;
+  const shouldDim =
+    selectionState?.selectedNetId || selectionState?.hoveredNetId;
+  const isConnectedToHighlightedNet =
+    shouldDim &&
+    data.ports?.some((port) => {
+      const netId = port.netId;
+      return (
+        netId === selectionState.selectedNetId ||
+        netId === selectionState.hoveredNetId
+      );
+    });
+  const opacity = shouldDim && !isConnectedToHighlightedNet ? 0.2 : 1;
+
   return (
     <div
       className="react-flow-net-junction-node"
@@ -1181,28 +1259,35 @@ const NetJunctionNode = ({ data }: { data: SchematicNodeData }) => {
         cursor: "default",
         pointerEvents: "none",
         position: "relative",
-        opacity: 0, // Make it completely invisible
+        opacity: opacity,
       }}
     >
-      <div className="module-ports" data-port-id={data.ports?.[0]?.id}>
+      {/* Junction dot */}
+      <div
+        style={{
+          position: "absolute",
+          width: "6px",
+          height: "6px",
+          borderRadius: "50%",
+          backgroundColor: edgeColor,
+          top: "2px",
+          left: "2px",
+        }}
+      />
+
+      <div className="junction-ports" data-port-id={data.ports?.[0]?.id}>
         {/* Single handle for connections */}
         <Handle
           type="source"
           id={`${data.ports?.[0]?.id}-source`}
           position={Position.Left}
-          style={{ opacity: 0 }}
+          style={{ opacity: 0, left: 5, top: 5 }}
         />
         <Handle
           type="target"
           id={`${data.ports?.[0]?.id}-target`}
           position={Position.Left}
-          style={{ opacity: 0 }}
-        />
-        <Handle
-          type="target"
-          id={`${data.ports?.[0]?.id}`}
-          position={Position.Left}
-          style={{ opacity: 0 }}
+          style={{ opacity: 0, left: 5, top: 5 }}
         />
       </div>
     </div>
@@ -1210,125 +1295,261 @@ const NetJunctionNode = ({ data }: { data: SchematicNodeData }) => {
 };
 
 // Utility to get a CSS variable and convert to Color
-function getVSCodeColor(varName: string, fallback: string): Color {
-  const cssValue = getComputedStyle(document.documentElement)
-    .getPropertyValue(varName)
-    .trim();
-  try {
-    return Color.from_css(cssValue || fallback);
-  } catch {
-    // fallback if parsing fails
-    return Color.from_css(fallback);
-  }
-}
+// function getVSCodeColor(varName: string, fallback: string): Color {
+//   const cssValue = getComputedStyle(document.documentElement)
+//     .getPropertyValue(varName)
+//     .trim();
+//   try {
+//     return Color.from_css(cssValue || fallback);
+//   } catch {
+//     // fallback if parsing fails
+//     return Color.from_css(fallback);
+//   }
+// }
 
 // Utility to build a SchematicTheme from VSCode theme variables
-function getVSCodeSchematicTheme(): Partial<
-  import("kicanvas/kicad/theme").SchematicTheme
-> {
-  return {
-    background: getVSCodeColor("--vscode-editor-background", "#ffffff"),
-    component_outline: getVSCodeColor("--vscode-editor-foreground", "#666666"),
-    component_body: getVSCodeColor("--vscode-editor-background", "#ffffff"),
-    pin: getVSCodeColor("--vscode-editor-foreground", "#666666"),
-    pin_name: getVSCodeColor("--vscode-editor-foreground", "#666666"),
-    pin_number: getVSCodeColor("--vscode-editor-foreground", "#666666"),
-    reference: getVSCodeColor(
-      "--vscode-editorLineNumber-foreground",
-      "#666666"
-    ),
-    value: getVSCodeColor("--vscode-editorLineNumber-foreground", "#666666"),
-    fields: getVSCodeColor("--vscode-editorLineNumber-foreground", "#666666"),
-    wire: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    bus: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    junction: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    label_local: getVSCodeColor("--vscode-foreground", "#000000"),
-    label_global: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    label_hier: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    no_connect: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    note: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    sheet_background: getVSCodeColor("--vscode-editor-background", "#ffffff"),
-    sheet: getVSCodeColor("--vscode-editor-foreground", "#666666"),
-    sheet_label: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    sheet_fields: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    sheet_filename: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    sheet_name: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#666666"
-    ),
-    erc_warning: getVSCodeColor("--vscode-editorWarning-foreground", "#FFA500"),
-    erc_error: getVSCodeColor("--vscode-editorError-foreground", "#FF0000"),
-    grid: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#cccccc"
-    ),
-    grid_axes: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#cccccc"
-    ),
-    hidden: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#cccccc"
-    ),
-    brightened: getVSCodeColor(
-      "--vscode-activityBarBadge-background",
-      "#ff00ff"
-    ),
-    worksheet: getVSCodeColor("--vscode-editor-background", "#ffffff"),
-    cursor: getVSCodeColor("--vscode-editorCursor-foreground", "#000000"),
-    aux_items: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#666666"
-    ),
-    anchor: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#0000ff"
-    ),
-    shadow: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "rgba(128,128,128,0.5)"
-    ),
-    bus_junction: getVSCodeColor(
-      "--vscode-editorLineNumber-dimmedForeground",
-      "#008000"
-    ),
-  };
-}
+// function getVSCodeSchematicTheme(): Partial<
+//   import("../third_party/kicanvas/kicad/theme").SchematicTheme
+// > {
+//   return {
+//     background: getVSCodeColor("--vscode-editor-background", "#ffffff"),
+//     component_outline: getVSCodeColor("--vscode-editor-foreground", "#666666"),
+//     component_body: getVSCodeColor("--vscode-editor-background", "#ffffff"),
+//     pin: getVSCodeColor("--vscode-editor-foreground", "#666666"),
+//     pin_name: getVSCodeColor("--vscode-editor-foreground", "#666666"),
+//     pin_number: getVSCodeColor("--vscode-editor-foreground", "#666666"),
+//     reference: getVSCodeColor(
+//       "--vscode-editorLineNumber-foreground",
+//       "#666666"
+//     ),
+//     value: getVSCodeColor("--vscode-editorLineNumber-foreground", "#666666"),
+//     fields: getVSCodeColor("--vscode-editorLineNumber-foreground", "#666666"),
+//     wire: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     bus: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     junction: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     label_local: getVSCodeColor("--vscode-foreground", "#000000"),
+//     label_global: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     label_hier: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     no_connect: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     note: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     sheet_background: getVSCodeColor("--vscode-editor-background", "#ffffff"),
+//     sheet: getVSCodeColor("--vscode-editor-foreground", "#666666"),
+//     sheet_label: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     sheet_fields: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     sheet_filename: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     sheet_name: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#666666"
+//     ),
+//     erc_warning: getVSCodeColor("--vscode-editorWarning-foreground", "#FFA500"),
+//     erc_error: getVSCodeColor("--vscode-editorError-foreground", "#FF0000"),
+//     grid: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#cccccc"
+//     ),
+//     grid_axes: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#cccccc"
+//     ),
+//     hidden: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#cccccc"
+//     ),
+//     brightened: getVSCodeColor(
+//       "--vscode-activityBarBadge-background",
+//       "#ff00ff"
+//     ),
+//     worksheet: getVSCodeColor("--vscode-editor-background", "#ffffff"),
+//     cursor: getVSCodeColor("--vscode-editorCursor-foreground", "#000000"),
+//     aux_items: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#666666"
+//     ),
+//     anchor: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#0000ff"
+//     ),
+//     shadow: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "rgba(128,128,128,0.5)"
+//     ),
+//     bus_junction: getVSCodeColor(
+//       "--vscode-editorLineNumber-dimmedForeground",
+//       "#008000"
+//     ),
+//   };
+// }
+
+// Component to render net reference labels using KiCanvas
+const NetReferenceLabel = React.memo(
+  ({
+    port,
+    side,
+    portX,
+    portY,
+    canvasRef,
+    selected,
+  }: {
+    port: any;
+    side: string;
+    portX: number;
+    portY: number;
+    canvasRef: (canvas: HTMLCanvasElement | null) => void;
+    selected?: boolean;
+  }) => {
+    const internalCanvasRef = useRef<HTMLCanvasElement>(null);
+    const [dimensions, setDimensions] = useState({ width: 100, height: 60 });
+
+    // Get the label text
+    const labelText =
+      port.labels.find(
+        (label: any) => label.properties?.labelType === "netReference"
+      )?.text || "";
+
+    // Convert side to direction - the arrow should point toward the symbol
+    const getDirection = useCallback((): LabelDirection => {
+      switch (side) {
+        case "WEST":
+          return "left"; // Arrow points left (toward symbol on the right)
+        case "EAST":
+          return "right"; // Arrow points right (toward symbol on the left)
+        case "NORTH":
+          return "up"; // Arrow points up (toward symbol below)
+        case "SOUTH":
+          return "down"; // Arrow points down (toward symbol above)
+        default:
+          return "left";
+      }
+    }, [side]);
+
+    useEffect(() => {
+      const renderLabel = async () => {
+        if (!internalCanvasRef.current || !labelText) return;
+
+        try {
+          const PADDING_MM = 0.15;
+
+          const info = await renderGlobalLabel(
+            internalCanvasRef.current,
+            labelText,
+            {
+              direction: getDirection(),
+              shape: "input",
+              scale: 10, // Scale up for visibility in the schematic
+              padding: PADDING_MM,
+              fontSize: 1.27, // Default KiCad font size
+              theme: selected ? SELECTED_THEME : DEFAULT_THEME,
+            }
+          );
+
+          // Update dimensions if they changed
+          if (
+            info.width !== dimensions.width ||
+            info.height !== dimensions.height
+          ) {
+            setDimensions({ width: info.width, height: info.height });
+          }
+        } catch (error) {
+          console.error("Error rendering net reference label:", error);
+        }
+      };
+
+      renderLabel();
+    }, [labelText, side, dimensions, getDirection, selected]);
+
+    // Calculate position offset based on side
+    const getPositionStyle = () => {
+      const baseStyle = {
+        position: "absolute" as const,
+        pointerEvents: "none" as const,
+        zIndex: 100,
+      };
+
+      switch (side) {
+        case "WEST":
+          return {
+            ...baseStyle,
+            left: portX - dimensions.width,
+            top: portY - dimensions.height / 2,
+          };
+        case "EAST":
+          return {
+            ...baseStyle,
+            left: portX,
+            top: portY - dimensions.height / 2,
+          };
+        case "NORTH":
+          return {
+            ...baseStyle,
+            left: portX - dimensions.width / 2,
+            top: portY - dimensions.height,
+          };
+        case "SOUTH":
+          return {
+            ...baseStyle,
+            left: portX - dimensions.width / 2,
+            top: portY,
+          };
+        default:
+          return baseStyle;
+      }
+    };
+
+    return (
+      <div className="port-net-reference" style={getPositionStyle()}>
+        <canvas
+          ref={(canvas) => {
+            internalCanvasRef.current = canvas;
+            canvasRef(canvas);
+          }}
+          width={dimensions.width}
+          height={dimensions.height}
+          style={{
+            width: `${dimensions.width}px`,
+            height: `${dimensions.height}px`,
+            backgroundColor: "rgba(0, 0, 0, 0)",
+          }}
+        />
+      </div>
+    );
+  }
+);
 
 // Define a node for KiCad symbols
 const SymbolNode = React.memo(
-  ({ data }: { data: SchematicNodeData }) => {
+  ({ data, selected }: { data: SchematicNodeData; selected?: boolean }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const labelCanvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
     const [isRendering, setIsRendering] = useState(true);
     const [renderError, setRenderError] = useState<string | null>(null);
 
@@ -1347,19 +1568,16 @@ const SymbolNode = React.memo(
       });
     const opacity = shouldDim && !isConnectedToHighlightedNet ? 0.2 : 1;
 
-    // Get symbol properties from node data
-    const symbolPath = data.properties?.symbolPath as string;
-    const symbolName = data.properties?.symbolName as string;
+    // Get rotation from data
+    const rotation = data.rotation || 0;
+
+    // Get netlist from node data
     const netlist = (data as any).netlist as Netlist;
 
     useEffect(() => {
       const renderSymbol = async () => {
-        if (
-          !canvasRef.current ||
-          !symbolPath ||
-          !netlist?.symbols?.[symbolPath]
-        ) {
-          setRenderError("Symbol data not available");
+        if (!canvasRef.current) {
+          setRenderError("Canvas not available");
           setIsRendering(false);
           return;
         }
@@ -1367,10 +1585,34 @@ const SymbolNode = React.memo(
         try {
           setIsRendering(true);
           const canvas = canvasRef.current;
-          const symbolContent = netlist.symbols[symbolPath];
+
+          // Get the symbol content from the __symbol_value attribute
+          const instance = netlist.instances[data.id];
+          const symbolValueAttr = instance?.attributes?.__symbol_value;
+
+          // Extract the string value from AttributeValue
+          let symbolContent: string | undefined;
+          if (typeof symbolValueAttr === "string") {
+            symbolContent = symbolValueAttr;
+          } else if (
+            symbolValueAttr &&
+            typeof symbolValueAttr === "object" &&
+            "String" in symbolValueAttr
+          ) {
+            symbolContent = symbolValueAttr.String;
+          }
+
+          if (!symbolContent) {
+            setRenderError(
+              "Symbol content not found in __symbol_value attribute"
+            );
+            setIsRendering(false);
+            return;
+          }
 
           // First, get the symbol info to know its natural size
-          const symbolInfo = getKicadSymbolInfo(symbolContent, symbolName, {
+          // We don't need a symbol name anymore since the content is self-contained
+          const symbolInfo = getKicadSymbolInfo(symbolContent, undefined, {
             unit: 1,
             bodyStyle: 1,
             tightBounds: false,
@@ -1380,19 +1622,10 @@ const SymbolNode = React.memo(
           const nodeWidth = data.width || 100;
           const nodeHeight = data.height || 100;
 
-          // Get device pixel ratio for crisp rendering
-          const dpr = window.devicePixelRatio || 1;
-
-          // Set canvas size to match node size exactly, accounting for device pixel ratio
-          canvas.width = nodeWidth * dpr;
-          canvas.height = nodeHeight * dpr;
-
-          // Scale the canvas context to account for device pixel ratio
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.save(); // Save the context state
-            ctx.scale(dpr, dpr);
-          }
+          // Set canvas size to match node size exactly
+          // The KiCad renderer handles device pixel ratio internally
+          canvas.width = nodeWidth;
+          canvas.height = nodeHeight;
 
           // The renderer.ts uses a scale factor of 10 to convert from symbol units to schematic units
           // So if the node is sized as symbolInfo.bbox.w * 10, we need to render at a scale
@@ -1401,45 +1634,30 @@ const SymbolNode = React.memo(
           // Calculate the scale needed to fit the symbol in the canvas
           // Use zero padding for exact fit
           const symbolPadding = 0; // Zero padding
-          // When rendering, we use the logical size (not multiplied by dpr)
-          const availableWidth = nodeWidth;
-          const availableHeight = nodeHeight;
 
           // The symbol's natural size (no padding needed since we want exact fit)
           const symbolWidthWithPadding = symbolInfo.bbox.w;
           const symbolHeightWithPadding = symbolInfo.bbox.h;
 
-          // Calculate scale to fit
-          const scaleX = availableWidth / symbolWidthWithPadding;
-          const scaleY = availableHeight / symbolHeightWithPadding;
+          // Calculate scale to fit the symbol in the logical node size
+          const scaleX = nodeWidth / symbolWidthWithPadding;
+          const scaleY = nodeHeight / symbolHeightWithPadding;
           const scale = Math.min(scaleX, scaleY);
 
-          console.log("Symbol rendering debug:", {
-            nodeWidth,
-            nodeHeight,
-            symbolBBox: symbolInfo.bbox,
-            scaleX,
-            scaleY,
-            finalScale: scale,
-          });
-
-          // Get theme from VSCode CSS variables
-          const vscodeTheme = getVSCodeSchematicTheme();
+          // Use selected theme if the node is selected
+          const theme = selected ? SELECTED_THEME : DEFAULT_THEME;
 
           // Render the symbol at the calculated scale
-          await renderKicadSymbol(canvas, symbolContent, symbolName, {
+          await renderKicadSymbol(canvas, symbolContent, undefined, {
             scale: scale,
             padding: symbolPadding, // Zero padding
             showPinNames: false,
             showPinNumbers: false,
             tightBounds: false, // Include pins to match renderer.ts
-            theme: vscodeTheme,
+            theme: theme,
           });
 
-          // Restore canvas context state
-          if (ctx) {
-            ctx.restore();
-          }
+          // No context state to restore since we're not manually scaling
 
           setIsRendering(false);
         } catch (error) {
@@ -1452,14 +1670,7 @@ const SymbolNode = React.memo(
       };
 
       renderSymbol();
-    }, [
-      symbolPath,
-      symbolName,
-      netlist.symbols.symbolPath,
-      data.width,
-      data.height,
-      netlist.symbols,
-    ]);
+    }, [data.width, data.height, data.id, netlist.instances, selected]);
 
     return (
       <div
@@ -1467,12 +1678,12 @@ const SymbolNode = React.memo(
         style={{
           width: data.width,
           height: data.height,
-          backgroundColor: "transparent",
-          border: "none",
-          cursor: "default",
           pointerEvents: "none",
           position: "relative",
           opacity: opacity,
+          // Apply rotation transform
+          transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+          transformOrigin: "center",
         }}
       >
         {/* Canvas for KiCad symbol rendering */}
@@ -1538,89 +1749,94 @@ const SymbolNode = React.memo(
             else if (side === "SOUTH") handlePosition = Position.Bottom;
 
             return (
-              <div
-                key={port.id}
-                className="component-port"
-                style={{
-                  position: "absolute",
-                  left: portX,
-                  top: portY,
-                  width: 1,
-                  height: 1,
-                  opacity: 0,
-                  zIndex: 20,
-                  pointerEvents: "auto",
-                }}
-                data-port-id={port.id}
-              >
-                <Handle
-                  type="source"
-                  position={handlePosition}
-                  id={`${port.id}-source`}
-                  style={{ ...portHandleStyle, opacity: 0 }}
-                />
-                <Handle
-                  type="target"
-                  position={handlePosition}
-                  id={`${port.id}-target`}
-                  style={{ ...portHandleStyle, opacity: 0 }}
-                />
+              <React.Fragment key={port.id}>
+                <div
+                  className="component-port"
+                  style={{
+                    position: "absolute",
+                    left: portX,
+                    top: portY,
+                    width: 1,
+                    height: 1,
+                    opacity: 0,
+                    zIndex: 20,
+                    pointerEvents: "auto",
+                  }}
+                  data-port-id={port.id}
+                >
+                  <Handle
+                    type="source"
+                    position={handlePosition}
+                    id={`${port.id}-source`}
+                    style={{ ...portHandleStyle, opacity: 0 }}
+                  />
+                  <Handle
+                    type="target"
+                    position={handlePosition}
+                    id={`${port.id}-target`}
+                    style={{ ...portHandleStyle, opacity: 0 }}
+                  />
+                </div>
 
-                {/* Port label - only show if configured */}
+                {/* Port label - rendered outside the port div */}
                 {port.labels && port.labels[0] && (
-                  <div
-                    className="port-label"
-                    style={{
-                      position: "absolute",
-                      fontSize: "10px",
-                      whiteSpace: "nowrap",
-                      pointerEvents: "none",
-                      color: electricalComponentColor,
-                      opacity: 0.7,
-                      transform:
-                        side === "WEST"
-                          ? "translate(5px, -5px)"
-                          : side === "EAST"
-                          ? "translate(-100%, -5px) translateX(-5px)"
-                          : side === "NORTH"
-                          ? "translate(-50%, 5px)"
-                          : "translate(-50%, -15px)",
-                      textAlign:
-                        side === "WEST"
-                          ? "left"
-                          : side === "EAST"
-                          ? "right"
-                          : "center",
-                    }}
-                  >
-                    {port.labels[0].text}
-                  </div>
+                  <>
+                    {/* Check if this is a net reference label */}
+                    {port.labels.some(
+                      (label) => label.properties?.labelType === "netReference"
+                    ) ? (
+                      // Render net reference with global label style using canvas
+                      <NetReferenceLabel
+                        port={port}
+                        side={side}
+                        portX={portX}
+                        portY={portY}
+                        selected={selected}
+                        canvasRef={(canvas) => {
+                          if (canvas) {
+                            labelCanvasRefs.current.set(port.id, canvas);
+                          }
+                        }}
+                      />
+                    ) : (
+                      // Regular port label (non-net reference)
+                      <div
+                        className="port-label"
+                        style={{
+                          position: "absolute",
+                          left: portX,
+                          top: portY,
+                          fontSize: "10px",
+                          whiteSpace: "nowrap",
+                          pointerEvents: "none",
+                          color: electricalComponentColor,
+                          opacity: 0.7,
+                          transform:
+                            side === "WEST"
+                              ? "translate(5px, -5px)"
+                              : side === "EAST"
+                              ? "translate(-100%, -5px) translateX(-5px)"
+                              : side === "NORTH"
+                              ? "translate(-50%, 5px)"
+                              : "translate(-50%, -15px)",
+                          textAlign:
+                            side === "WEST"
+                              ? "left"
+                              : side === "EAST"
+                              ? "right"
+                              : "center",
+                        }}
+                      >
+                        {port.labels[0].text}
+                      </div>
+                    )}
+                  </>
                 )}
-              </div>
+              </React.Fragment>
             );
           })}
         </div>
       </div>
-    );
-  },
-  (prevProps, nextProps) => {
-    // Custom comparison function for React.memo
-    // Only re-render if the symbol data or dimensions change
-    return (
-      prevProps.data.properties?.symbolPath ===
-        nextProps.data.properties?.symbolPath &&
-      prevProps.data.properties?.symbolName ===
-        nextProps.data.properties?.symbolName &&
-      prevProps.data.width === nextProps.data.width &&
-      prevProps.data.height === nextProps.data.height &&
-      // Also check if the opacity should change due to selection state
-      prevProps.data.selectionState?.selectedNetId ===
-        nextProps.data.selectionState?.selectedNetId &&
-      prevProps.data.selectionState?.hoveredNetId ===
-        nextProps.data.selectionState?.hoveredNetId &&
-      // Check if connected ports' netIds are the same
-      JSON.stringify(prevProps.data.ports?.map((p) => p.netId)) ===
-        JSON.stringify(nextProps.data.ports?.map((p) => p.netId))
     );
   }
 );
@@ -1662,6 +1878,9 @@ const ElectricalEdge = ({
     !isHovered;
   const opacity = shouldDim ? 0.2 : 1;
 
+  // Get junction points from edge data
+  const junctionPoints = data?.junctionPoints || [];
+
   return (
     <>
       <path
@@ -1685,24 +1904,18 @@ const ElectricalEdge = ({
         className="react-flow__edge-interaction"
       />
 
-      {/* Render junction points if they exist */}
-      {data?.junctionPoints &&
-        data.junctionPoints.map(
-          (point: { x: number; y: number }, index: number) => (
-            <circle
-              key={`junction-${id}-${index}`}
-              cx={point.x}
-              cy={point.y}
-              r={3.5}
-              fill={style.stroke || edgeColor}
-              style={{
-                ...style,
-                opacity: opacity,
-              }}
-              className="electrical-junction-point"
-            />
-          )
-        )}
+      {/* Render junction points as small dots */}
+      {junctionPoints.map((point, index) => (
+        <circle
+          key={`${id}-junction-${index}`}
+          cx={point.x}
+          cy={point.y}
+          r={3}
+          fill={edgeColor}
+          opacity={opacity}
+          className="electrical-edge-junction"
+        />
+      ))}
     </>
   );
 };
@@ -1730,6 +1943,8 @@ interface ReactFlowSchematicViewerProps {
   onComponentSelect?: (componentId: string | null) => void;
   selectedComponent?: string | null;
   config?: Partial<SchematicConfig>;
+  showSettings?: boolean;
+  showDownloadButton?: boolean;
 }
 
 const Visualizer = ({
@@ -1737,23 +1952,25 @@ const Visualizer = ({
   onComponentSelect = () => {},
   selectedComponent = null,
   config = DEFAULT_CONFIG,
+  showSettings = false,
+  showDownloadButton = false,
 }: {
   netlist: Netlist;
   onComponentSelect?: (componentId: string | null) => void;
   selectedComponent?: string | null;
   config?: Partial<SchematicConfig>;
+  showSettings?: boolean;
+  showDownloadButton?: boolean;
 }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState<SchematicNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<SchematicEdge>([]);
-  const [elkLayout, setElkLayout] = useState<ElkGraph | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [nodePositions, setNodePositions] = useState<NodePositions>({});
   const [selectionState, setSelectionState] = useState<SelectionState>({
     selectedNetId: null,
     hoveredNetId: null,
   });
   const [prevComponent, setPrevComponent] = useState<string | null>(null);
-  const [shouldAnimate, setShouldAnimate] = useState(false);
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [showDebugPane, setShowDebugPane] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<SchematicConfig>({
     ...DEFAULT_CONFIG,
@@ -1797,6 +2014,62 @@ const Visualizer = ({
     []
   );
 
+  // Function to update both nodes and edges after drag
+  // This is separate from the main layout effect to avoid triggering fitView
+  const updateLayoutAfterDrag = useCallback(
+    async (updatedPositions: NodePositions) => {
+      if (!selectedComponent) return;
+
+      console.log("Updating layout after drag: ", updatedPositions);
+
+      try {
+        const renderer = new SchematicLayoutEngine(netlist, currentConfig);
+
+        // Use the unified layout method with updated positions
+        const layoutResult = await renderer.layout(
+          selectedComponent,
+          updatedPositions
+        );
+
+        // Get current nodes to preserve selection state
+        const currentNodes = reactFlowInstance.current?.getNodes() || [];
+        const selectedNodeIds = new Set(
+          currentNodes.filter((n: any) => n.selected).map((n: any) => n.id)
+        );
+
+        // Update both nodes and edges from the layout result
+        const newNodes = layoutResult.children.map((elkNode) => {
+          const node = createSchematicNode(elkNode, selectionState, netlist);
+          // Preserve selection state
+          node.selected = selectedNodeIds.has(node.id);
+          return node;
+        });
+
+        setNodes(newNodes);
+
+        // Update edges as well
+        const newEdges = layoutResult.edges.map((elkEdge) =>
+          createSchematicEdge(elkEdge, selectionState)
+        );
+
+        setEdges(newEdges);
+
+        // Update the stored node positions
+        setNodePositions(layoutResult.nodePositions);
+      } catch (error) {
+        console.error("Error updating nodes and edges:", error);
+      }
+    },
+    [
+      netlist,
+      selectedComponent,
+      currentConfig,
+      selectionState,
+      setNodes,
+      setEdges,
+    ]
+  );
+
   // Cleanup debounced functions on unmount
   useEffect(() => {
     return () => {
@@ -1810,19 +2083,46 @@ const Visualizer = ({
     elkInstance.current = new ELK();
   }, []);
 
+  // Main layout effect - runs when component changes or is first loaded
+  // This effect handles fitView to center the schematic
   useEffect(() => {
     async function render() {
-      const renderer = new SchematicRenderer(netlist, currentConfig);
+      console.log("Running main render effect: ", selectedComponent);
       if (selectedComponent) {
         try {
-          let layout = await renderer.render(selectedComponent);
-
           // Determine if we should animate based on whether the component changed
           const isNewComponent = prevComponent !== selectedComponent;
-          setShouldAnimate(!isNewComponent);
+
+          // If switching to a new component, clear node positions
+          let currentNodePositions = nodePositions;
+          if (isNewComponent && prevComponent !== null) {
+            // Clear positions when switching components
+            setNodePositions({});
+            currentNodePositions = {};
+          }
+
+          const renderer = new SchematicLayoutEngine(netlist, currentConfig);
+
+          const layoutResult = await renderer.layout(
+            selectedComponent,
+            currentNodePositions
+          );
+
           setPrevComponent(selectedComponent);
 
-          setElkLayout(layout as ElkGraph);
+          // Update node positions with the layout result
+          setNodePositions(layoutResult.nodePositions);
+
+          const nodes = layoutResult.children.map((elkNode) =>
+            createSchematicNode(elkNode, selectionState, netlist)
+          );
+          const edges = layoutResult.edges.map((elkEdge) =>
+            createSchematicEdge(elkEdge, selectionState)
+          );
+
+          setNodes(nodes);
+          setEdges(edges);
+
           // Center the view after new component is rendered
           setTimeout(() => {
             reactFlowInstance.current?.fitView({
@@ -1840,59 +2140,298 @@ const Visualizer = ({
     }
 
     render();
-  }, [netlist, selectedComponent, prevComponent, currentConfig]);
-
-  // Update nodes and edges when layout changes
-  useEffect(() => {
-    if (elkLayout) {
-      const nodes = elkLayout.children.map((elkNode) =>
-        createSchematicNode(elkNode, selectionState, netlist)
-      );
-
-      // Add animation class if we're updating the same component
-      const nodesWithAnimation = nodes.map((node) => ({
-        ...node,
-        className: `${node.className || ""} ${
-          shouldAnimate ? "animate-layout" : ""
-        }`.trim(),
-      }));
-
-      setNodes(nodesWithAnimation);
-
-      const edges = elkLayout.edges.map((elkEdge) =>
-        createSchematicEdge(elkEdge, selectionState)
-      );
-
-      // Add animation class to edges as well
-      const edgesWithAnimation = edges.map((edge) => ({
-        ...edge,
-        className: shouldAnimate ? "animate-layout" : "",
-      }));
-
-      setEdges(edgesWithAnimation);
-
-      // Reset animation flag after applying it
-      if (shouldAnimate) {
-        setTimeout(() => {
-          setShouldAnimate(false);
-        }, 50);
-      }
-    }
-  }, [elkLayout, setNodes, setEdges, selectionState, shouldAnimate, netlist]);
+    // TODO: fix
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    netlist,
+    selectedComponent,
+    prevComponent,
+    currentConfig,
+    selectionState,
+    setEdges,
+    setNodes,
+  ]);
 
   // Handle node click to select a component - only if the component is clickable (modules)
   const handleNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      event.preventDefault();
+      // Don't prevent default - let React Flow handle selection
 
-      // Check if the node is a module (which should be clickable)
+      // Check if the node is a module (which should be clickable for navigation)
       const nodeData = node.data as SchematicNodeData;
       if (nodeData.componentType === NodeType.MODULE) {
-        onComponentSelect(node.id);
+        // Only navigate if it's a double-click or some other interaction
+        // Single click should just select the node
+        if (event.detail === 2) {
+          // Double click
+          onComponentSelect(node.id);
+        }
+      }
+
+      // For all nodes, ensure selection is handled properly
+      if (reactFlowInstance.current) {
+        const currentNodes = reactFlowInstance.current.getNodes();
+        const isMultiSelect = event.shiftKey || event.metaKey || event.ctrlKey;
+
+        const updatedNodes = currentNodes.map((n: any) => ({
+          ...n,
+          selected: isMultiSelect
+            ? n.id === node.id
+              ? !n.selected
+              : n.selected
+            : n.id === node.id,
+        }));
+
+        reactFlowInstance.current.setNodes(updatedNodes);
       }
     },
     [onComponentSelect]
   );
+
+  // Track dragging state
+  const [isDragging, setIsDragging] = useState(false);
+  const [pendingPositions, setPendingPositions] = useState<NodePositions>({});
+
+  // Create a debounced version of updateLayoutAfterDrag for real-time updates
+  const debouncedUpdateLayout = useMemo(
+    () =>
+      debounce((positions: NodePositions) => {
+        updateLayoutAfterDrag(positions);
+      }, 50), // 50ms debounce for smooth real-time updates
+    [updateLayoutAfterDrag]
+  );
+
+  // Cleanup debounced layout update on unmount
+  useEffect(() => {
+    return () => {
+      debouncedUpdateLayout.cancel();
+    };
+  }, [debouncedUpdateLayout]);
+
+  // Add keyboard event handler for rotation
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      // Check if 'R' key is pressed (case insensitive)
+      if (event.key.toLowerCase() === "r") {
+        console.log("[Rotation] R key pressed");
+
+        // Get the currently selected nodes from React Flow
+        const selectedNodes = reactFlowInstance.current
+          ?.getNodes()
+          .filter((node: any) => node.selected);
+
+        console.log("[Rotation] Selected nodes:", selectedNodes);
+
+        if (selectedNodes && selectedNodes.length > 0) {
+          // Update rotation for each selected node
+          const updatedPositions = { ...nodePositions };
+          let hasChanges = false;
+
+          selectedNodes.forEach((node: any) => {
+            const currentPosition = nodePositions[node.id];
+            console.log(
+              `[Rotation] Current position for ${node.id}:`,
+              currentPosition
+            );
+
+            if (currentPosition) {
+              // Rotate by 90 degrees clockwise
+              const currentRotation = currentPosition.rotation || 0;
+              const newRotation = (currentRotation + 90) % 360;
+
+              console.log(
+                `[Rotation] Rotating ${node.id} from ${currentRotation} to ${newRotation} degrees`
+              );
+
+              updatedPositions[node.id] = {
+                ...currentPosition,
+                rotation: newRotation,
+              };
+              hasChanges = true;
+            } else {
+              console.log(
+                `[Rotation] No position found for ${node.id}, creating new position`
+              );
+              // If no position exists yet, create one with just rotation
+              updatedPositions[node.id] = {
+                x: node.position.x,
+                y: node.position.y,
+                rotation: 90,
+              };
+              hasChanges = true;
+            }
+          });
+
+          if (hasChanges) {
+            console.log("[Rotation] Updated positions:", updatedPositions);
+            // Update positions and trigger layout update
+            setNodePositions(updatedPositions);
+            updateLayoutAfterDrag(updatedPositions);
+
+            // Preserve selection after rotation by re-selecting the nodes
+            setTimeout(() => {
+              if (reactFlowInstance.current) {
+                // Get the current nodes
+                const currentNodes = reactFlowInstance.current.getNodes();
+
+                // Update the selected nodes to maintain selection
+                const updatedNodes = currentNodes.map((node: any) => {
+                  const wasSelected = selectedNodes.some(
+                    (selected: any) => selected.id === node.id
+                  );
+                  return {
+                    ...node,
+                    selected: wasSelected,
+                  };
+                });
+
+                reactFlowInstance.current.setNodes(updatedNodes);
+              }
+            }, 100); // Small delay to ensure layout update has completed
+          }
+        } else {
+          console.log("[Rotation] No nodes selected");
+        }
+      }
+    };
+
+    // Add event listener
+    window.addEventListener("keydown", handleKeyPress);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener("keydown", handleKeyPress);
+    };
+  }, [nodePositions, updateLayoutAfterDrag]);
+
+  // Custom handler for node changes to capture position updates
+  const handleNodesChange = useCallback(
+    (changes: any[]) => {
+      // Apply snapping to position changes before they're applied
+      if (currentConfig.layout.gridSnap.enabled) {
+        const gridSize = currentConfig.layout.gridSnap.size;
+
+        changes = changes.map((change) => {
+          if (change.type === "position" && change.position) {
+            // Snap the position immediately
+            const snapped = snapPosition(
+              change.position.x,
+              change.position.y,
+              gridSize
+            );
+            return {
+              ...change,
+              position: snapped,
+            };
+          }
+          return change;
+        });
+      }
+
+      // First, apply the changes using the default handler
+      onNodesChange(changes);
+
+      // Check if any position changes occurred
+      const positionChanges = changes.filter(
+        (change) => change.type === "position" && change.position
+      );
+
+      if (positionChanges.length > 0) {
+        // Update node positions based on the changes
+        const updatedPositions = { ...nodePositions };
+        let hasActualChanges = false;
+
+        positionChanges.forEach((change) => {
+          if (change.position) {
+            const currentPos = nodePositions[change.id];
+            // Only update if position actually changed
+            if (
+              !currentPos ||
+              Math.abs(currentPos.x - change.position.x) > 0.01 ||
+              Math.abs(currentPos.y - change.position.y) > 0.01
+            ) {
+              hasActualChanges = true;
+              updatedPositions[change.id] = {
+                x: change.position.x,
+                y: change.position.y,
+                // Preserve existing width/height/rotation if they exist
+                ...(currentPos && {
+                  width: currentPos.width,
+                  height: currentPos.height,
+                  rotation: currentPos.rotation,
+                }),
+              };
+            }
+          }
+        });
+
+        // Only update if there were actual changes
+        if (hasActualChanges) {
+          // Update positions immediately
+          setNodePositions(updatedPositions);
+          setPendingPositions(updatedPositions);
+
+          // If we're dragging, update layout with debouncing
+          if (isDragging) {
+            debouncedUpdateLayout(updatedPositions);
+          } else {
+            // Not dragging, update positions immediately (e.g., programmatic moves)
+            updateLayoutAfterDrag(updatedPositions);
+          }
+        }
+      }
+    },
+    [
+      onNodesChange,
+      nodePositions,
+      updateLayoutAfterDrag,
+      isDragging,
+      debouncedUpdateLayout,
+      currentConfig,
+    ]
+  );
+
+  // Handle node drag start
+  const handleNodeDragStart = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      setIsDragging(true);
+
+      // Select the node when dragging starts
+      if (reactFlowInstance.current) {
+        const currentNodes = reactFlowInstance.current.getNodes();
+
+        // Update nodes to select only the dragged node (unless shift/cmd is held)
+        const isMultiSelect = event.shiftKey || event.metaKey || event.ctrlKey;
+
+        const updatedNodes = currentNodes.map((n: any) => ({
+          ...n,
+          selected: isMultiSelect
+            ? n.id === node.id
+              ? true
+              : n.selected
+            : n.id === node.id,
+        }));
+
+        reactFlowInstance.current.setNodes(updatedNodes);
+      }
+    },
+    []
+  );
+
+  // Handle node drag stop - finalize the drag operation
+  const handleNodeDragStop = useCallback(() => {
+    setIsDragging(false);
+
+    // Cancel any pending debounced updates
+    debouncedUpdateLayout.cancel();
+
+    // If we have pending positions from the drag, do a final update
+    if (Object.keys(pendingPositions).length > 0) {
+      // Do a final update to ensure we have the exact final positions
+      updateLayoutAfterDrag(pendingPositions);
+      setPendingPositions({});
+    }
+  }, [pendingPositions, updateLayoutAfterDrag, debouncedUpdateLayout]);
 
   useOnSelectionChange({
     onChange: useCallback(
@@ -1907,27 +2446,6 @@ const Visualizer = ({
       [selectionState.selectedNetId, debouncedSetSelectedNet]
     ),
   });
-
-  const handleDownloadPDF = async () => {
-    if (!selectedComponent) return;
-
-    setIsGeneratingPDF(true);
-    try {
-      // Create PDF renderer with current config - use the exact same config as the React viewer
-      const pdfRenderer = new PDFSchematicRenderer(netlist, currentConfig);
-
-      // Render the PDF
-      const doc = await pdfRenderer.render(selectedComponent);
-
-      // Save the PDF with a clean filename
-      const filename = `${selectedComponent.split(".").pop()}_schematic.pdf`;
-      doc.save(filename);
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-    } finally {
-      setIsGeneratingPDF(false);
-    }
-  };
 
   const updateConfig = useCallback((updates: Partial<SchematicConfig>) => {
     setCurrentConfig((prev) => ({
@@ -1955,8 +2473,8 @@ const Visualizer = ({
         {`
         /* Debug pane styles */
         .debug-pane {
-          background-color: var(--vscode-sideBar-background, #252526);
-          border: 1px solid var(--vscode-sideBar-border, #3c3c3c);
+          background-color: ${backgroundColor};
+          border: 1px solid ${electricalComponentColor};
           border-radius: 4px;
           padding: 12px;
           max-width: 280px;
@@ -1969,7 +2487,7 @@ const Visualizer = ({
           margin: 0 0 12px 0;
           font-size: 14px;
           font-weight: 600;
-          color: var(--vscode-foreground, #cccccc);
+          color: ${labelColor};
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -1983,7 +2501,7 @@ const Visualizer = ({
           margin: 0 0 8px 0;
           font-size: 12px;
           font-weight: 600;
-          color: var(--vscode-foreground, #cccccc);
+          color: ${labelColor};
           opacity: 0.8;
         }
 
@@ -1996,7 +2514,7 @@ const Visualizer = ({
 
         .debug-pane-control label {
           font-size: 12px;
-          color: var(--vscode-foreground, #cccccc);
+          color: ${labelColor};
           flex: 1;
         }
 
@@ -2010,9 +2528,9 @@ const Visualizer = ({
         }
 
         .debug-pane-control select {
-          background-color: var(--vscode-input-background, #3c3c3c);
-          color: var(--vscode-input-foreground, #cccccc);
-          border: 1px solid var(--vscode-input-border, #616161);
+          background-color: ${backgroundColor};
+          color: ${labelColor};
+          border: 1px solid ${electricalComponentColor};
           border-radius: 2px;
           padding: 2px 4px;
           font-size: 12px;
@@ -2021,7 +2539,7 @@ const Visualizer = ({
 
         .debug-pane-control .value-display {
           font-size: 11px;
-          color: var(--vscode-foreground, #cccccc);
+          color: ${labelColor};
           opacity: 0.7;
           min-width: 30px;
           text-align: right;
@@ -2031,17 +2549,18 @@ const Visualizer = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: var(--vscode-button-background, #0066cc);
-          color: var(--vscode-button-foreground, #fff);
-          border: 1px solid var(--vscode-button-border, transparent);
+          background-color: ${backgroundColor};
+          color: ${electricalComponentColor};
+          border: 1px solid ${electricalComponentColor};
           padding: 8px;
           border-radius: 4px;
           cursor: pointer;
-          transition: background-color 0.2s;
+          transition: background-color 0.2s, color 0.2s;
         }
 
         .debug-toggle-button:hover {
-          background-color: var(--vscode-button-hoverBackground, #0052a3);
+          background-color: ${electricalComponentColor};
+          color: ${backgroundColor};
         }
 
         .debug-toggle-button svg {
@@ -2055,11 +2574,9 @@ const Visualizer = ({
         <div
           className="error-message"
           style={{
-            color: "var(--vscode-errorForeground, #f44336)",
-            backgroundColor:
-              "var(--vscode-inputValidation-errorBackground, #fde7e9)",
-            border:
-              "1px solid var(--vscode-inputValidation-errorBorder, #f44336)",
+            color: DEFAULT_THEME.erc_error.to_css(),
+            backgroundColor: backgroundColor,
+            border: `1px solid ${DEFAULT_THEME.erc_error.to_css()}`,
             padding: "10px",
             margin: "10px",
             borderRadius: "4px",
@@ -2073,8 +2590,8 @@ const Visualizer = ({
       <div
         className="react-flow-schematic-viewer"
         style={{
-          backgroundColor: "var(--vscode-editor-background, #fff)",
-          color: "var(--vscode-foreground, #000)",
+          backgroundColor: backgroundColor,
+          color: labelColor,
           height: "100%",
           width: "100%",
           outline: "none",
@@ -2084,7 +2601,7 @@ const Visualizer = ({
           proOptions={{ hideAttribution: true }}
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
@@ -2093,6 +2610,19 @@ const Visualizer = ({
             reactFlowInstance.current = instance;
           }}
           onNodeClick={handleNodeClick}
+          onNodeDragStart={handleNodeDragStart}
+          onNodeDragStop={handleNodeDragStop}
+          onPaneClick={() => {
+            // Clear selection when clicking on background
+            if (reactFlowInstance.current) {
+              const currentNodes = reactFlowInstance.current.getNodes();
+              const updatedNodes = currentNodes.map((n: any) => ({
+                ...n,
+                selected: false,
+              }));
+              reactFlowInstance.current.setNodes(updatedNodes);
+            }
+          }}
           onEdgeMouseEnter={(_event, edge) => {
             if (
               edge.data?.netId &&
@@ -2114,48 +2644,65 @@ const Visualizer = ({
             interactionWidth: 10,
           }}
           style={{
-            backgroundColor: "var(--vscode-editor-background, #fff)",
+            backgroundColor: backgroundColor,
           }}
-          nodesDraggable={false}
+          nodesDraggable={true}
           nodesConnectable={false}
           elementsSelectable={true}
-          selectNodesOnDrag={false}
+          selectNodesOnDrag={true}
           zoomOnScroll={true}
           panOnScroll={true}
           panOnDrag={true}
           preventScrolling={false}
+          minZoom={0.1}
+          maxZoom={1.5}
         >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={currentConfig.layout.gridSnap.size}
+            size={1}
+            color={electricalComponentColor}
+            style={{ opacity: 0.25 }}
+          />
           <Controls showInteractive={false} />
-          <Panel position="top-right">
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <button
-                className="debug-toggle-button"
-                onClick={() => setShowDebugPane(!showDebugPane)}
-                title="Toggle debug options"
+          {(showSettings || showDownloadButton) && (
+            <Panel position="top-right">
+              <div
+                style={{ display: "flex", gap: "8px", alignItems: "center" }}
               >
-                <Settings size={16} />
-              </button>
-              <button
-                className="download-button"
-                onClick={handleDownloadPDF}
-                disabled={!selectedComponent || isGeneratingPDF}
-                title={
-                  !selectedComponent
-                    ? "Select a component to download"
-                    : isGeneratingPDF
-                    ? "Generating PDF..."
-                    : "Download schematic as PDF"
-                }
-              >
-                {isGeneratingPDF ? (
-                  <Loader size={16} className="loading-icon" />
-                ) : (
-                  <Download size={16} />
+                {showSettings && (
+                  <button
+                    className="debug-toggle-button"
+                    onClick={() => setShowDebugPane(!showDebugPane)}
+                    title="Toggle debug options"
+                  >
+                    <Settings size={16} />
+                  </button>
                 )}
-                {isGeneratingPDF ? "Generating..." : "Download PDF"}
-              </button>
-            </div>
-          </Panel>
+                {/* {showDownloadButton && (
+                  <button
+                    className="download-button"
+                    onClick={handleDownloadPDF}
+                    disabled={!selectedComponent || isGeneratingPDF}
+                    title={
+                      !selectedComponent
+                        ? "Select a component to download"
+                        : isGeneratingPDF
+                        ? "Generating PDF..."
+                        : "Download schematic as PDF"
+                    }
+                  >
+                    {isGeneratingPDF ? (
+                      <Loader size={16} className="loading-icon" />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                    {isGeneratingPDF ? "Generating..." : "Download PDF"}
+                  </button>
+                )} */}
+              </div>
+            </Panel>
+          )}
 
           {showDebugPane && (
             <Panel position="top-left">
@@ -2167,7 +2714,7 @@ const Visualizer = ({
                     style={{
                       background: "none",
                       border: "none",
-                      color: "var(--vscode-foreground, #cccccc)",
+                      color: labelColor,
                       cursor: "pointer",
                       padding: "4px",
                       opacity: 0.7,
@@ -2244,18 +2791,25 @@ const Visualizer = ({
                       {currentConfig.layout.padding}
                     </span>
                   </div>
+                </div>
+
+                <div className="debug-pane-section">
+                  <h4>Grid Snapping</h4>
 
                   <div className="debug-pane-control">
-                    <label htmlFor="explodeModules">Explode Modules:</label>
+                    <label htmlFor="gridSnapEnabled">Enable Grid Snap:</label>
                     <input
-                      id="explodeModules"
+                      id="gridSnapEnabled"
                       type="checkbox"
-                      checked={currentConfig.layout.explodeModules}
+                      checked={currentConfig.layout.gridSnap.enabled}
                       onChange={(e) =>
                         updateConfig({
                           layout: {
                             ...currentConfig.layout,
-                            explodeModules: e.target.checked,
+                            gridSnap: {
+                              ...currentConfig.layout.gridSnap,
+                              enabled: e.target.checked,
+                            },
                           },
                         })
                       }
@@ -2263,44 +2817,29 @@ const Visualizer = ({
                   </div>
 
                   <div className="debug-pane-control">
-                    <label htmlFor="smartNetReferencePositioning">
-                      Smart Net Reference Positioning:
-                    </label>
+                    <label htmlFor="gridSize">Grid Size:</label>
                     <input
-                      id="smartNetReferencePositioning"
-                      type="checkbox"
-                      checked={
-                        currentConfig.layout.smartNetReferencePositioning ??
-                        true
-                      }
+                      id="gridSize"
+                      type="range"
+                      min="5"
+                      max="50"
+                      step="0.1"
+                      value={currentConfig.layout.gridSnap.size}
                       onChange={(e) =>
                         updateConfig({
                           layout: {
                             ...currentConfig.layout,
-                            smartNetReferencePositioning: e.target.checked,
+                            gridSnap: {
+                              ...currentConfig.layout.gridSnap,
+                              size: Number(e.target.value),
+                            },
                           },
                         })
                       }
                     />
-                  </div>
-
-                  <div className="debug-pane-control">
-                    <label htmlFor="smartEdgeSplitting">
-                      Smart Edge Splitting:
-                    </label>
-                    <input
-                      id="smartEdgeSplitting"
-                      type="checkbox"
-                      checked={currentConfig.layout.smartEdgeSplitting ?? true}
-                      onChange={(e) =>
-                        updateConfig({
-                          layout: {
-                            ...currentConfig.layout,
-                            smartEdgeSplitting: e.target.checked,
-                          },
-                        })
-                      }
-                    />
+                    <span className="value-display">
+                      {currentConfig.layout.gridSnap.size.toFixed(1)}
+                    </span>
                   </div>
                 </div>
 
@@ -2374,6 +2913,8 @@ const ReactFlowSchematicViewer = ({
   onComponentSelect = () => {},
   selectedComponent = null,
   config = DEFAULT_CONFIG,
+  showSettings = false,
+  showDownloadButton = false,
 }: ReactFlowSchematicViewerProps) => {
   return (
     <ReactFlowProvider>
@@ -2382,6 +2923,8 @@ const ReactFlowSchematicViewer = ({
         onComponentSelect={onComponentSelect}
         selectedComponent={selectedComponent}
         config={config}
+        showSettings={showSettings}
+        showDownloadButton={showDownloadButton}
       />
     </ReactFlowProvider>
   );

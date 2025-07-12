@@ -1,10 +1,21 @@
 // KiCad Symbol Renderer
 // Renders a kicad_sym file to a canvas element
 
-import { Color } from "kicanvas/base/color";
-import { Angle, BBox, Matrix3, Vec2, Arc as MathArc } from "kicanvas/base/math";
-import { Canvas2DRenderer } from "kicanvas/graphics/canvas2d";
-import { Arc, Circle, Polygon, Polyline } from "kicanvas/graphics/shapes";
+import { Color } from "../third_party/kicanvas/base/color";
+import {
+  Angle,
+  BBox,
+  Matrix3,
+  Vec2,
+  Arc as MathArc,
+} from "../third_party/kicanvas/base/math";
+import { Canvas2DRenderer } from "../third_party/kicanvas/graphics/canvas2d";
+import {
+  Arc,
+  Circle,
+  Polygon,
+  Polyline,
+} from "../third_party/kicanvas/graphics/shapes";
 import {
   LibSymbol,
   LibText,
@@ -18,23 +29,22 @@ import {
   DefaultValues,
   Property,
   SchematicSymbol,
-} from "kicanvas/kicad/schematic";
-import { StrokeFont } from "kicanvas/kicad/text/stroke-font";
-import { LibText as LibTextRenderer } from "kicanvas/kicad/text/lib-text";
-import { SchField } from "kicanvas/kicad/text/sch-field";
-import { parse_expr, P, T } from "kicanvas/kicad/parser";
-import type { SchematicTheme } from "kicanvas/kicad/theme";
-import { LayerNames } from "kicanvas/viewers/schematic/layers";
+} from "../third_party/kicanvas/kicad/schematic";
+import { StrokeFont } from "../third_party/kicanvas/kicad/text/stroke-font";
+import { LibText as LibTextRenderer } from "../third_party/kicanvas/kicad/text/lib-text";
+import { SchField } from "../third_party/kicanvas/kicad/text/sch-field";
+import type { SchematicTheme } from "../third_party/kicanvas/kicad/theme";
+import { LayerNames } from "../third_party/kicanvas/viewers/schematic/layers";
 import {
   PinPainter,
   PinShapeInternals,
   PinLabelInternals,
   type PinInfo,
-} from "kicanvas/viewers/schematic/painters/pin";
-import type { SymbolTransform } from "kicanvas/viewers/schematic/painters/symbol";
+} from "../third_party/kicanvas/viewers/schematic/painters/pin";
+import type { SymbolTransform } from "../third_party/kicanvas/viewers/schematic/painters/symbol";
 
 // Default theme colors matching kicanvas defaults
-const DEFAULT_THEME: SchematicTheme = {
+export const DEFAULT_THEME: SchematicTheme = {
   background: new Color(1, 1, 1, 1), // White background
   component_outline: new Color(0.5, 0, 0, 1), // Dark red outlines
   component_body: new Color(1, 1, 0.8, 1), // Light yellow fill
@@ -70,6 +80,45 @@ const DEFAULT_THEME: SchematicTheme = {
   anchor: new Color(0, 0, 1, 1),
   shadow: new Color(0.5, 0.5, 0.5, 0.5),
   bus_junction: new Color(0, 0.5, 0, 1),
+};
+
+// Brighter theme for selected symbols
+export const SELECTED_THEME: SchematicTheme = {
+  background: new Color(1, 1, 1, 1), // Keep white background
+  component_outline: new Color(0.8, 0, 0, 1), // Brighter red outlines
+  component_body: new Color(1, 1, 0.9, 1), // Lighter yellow fill
+  pin: new Color(0.8, 0, 0, 1), // Brighter red pins
+  pin_name: new Color(0.8, 0, 0, 1),
+  pin_number: new Color(0.8, 0, 0, 1),
+  reference: new Color(0, 0.8, 0.8, 1), // Brighter cyan reference
+  value: new Color(0, 0.8, 0.8, 1), // Brighter cyan value
+  fields: new Color(0, 0.8, 0.8, 1), // Brighter cyan fields
+  wire: new Color(0, 0.8, 0, 1), // Brighter green
+  bus: new Color(0, 0, 0.8, 1), // Brighter blue
+  junction: new Color(0, 0.8, 0, 1),
+  label_local: new Color(0.2, 0.2, 0.2, 1), // Slightly lighter black
+  label_global: new Color(0.8, 0, 0, 1), // Brighter red
+  label_hier: new Color(0.8, 0.4, 0, 1), // Brighter orange
+  no_connect: new Color(0, 0, 0.8, 1),
+  note: new Color(0, 0, 0.8, 1),
+  sheet_background: new Color(1, 1, 0.9, 1),
+  sheet: new Color(0.8, 0, 0, 1),
+  sheet_label: new Color(0.8, 0.4, 0, 1),
+  sheet_fields: new Color(0.8, 0, 0.8, 1),
+  sheet_filename: new Color(0.8, 0.4, 0, 1),
+  sheet_name: new Color(0, 0.8, 0.8, 1),
+  erc_warning: new Color(1, 0.7, 0, 1),
+  erc_error: new Color(1, 0.2, 0.2, 1),
+  grid: new Color(0.7, 0.7, 0.7, 1),
+  grid_axes: new Color(0, 0, 0.8, 1),
+  hidden: new Color(0.7, 0.7, 0.7, 1),
+  brightened: new Color(1, 0.2, 1, 1),
+  worksheet: new Color(0.8, 0, 0, 1),
+  cursor: new Color(0.2, 0.2, 0.2, 1),
+  aux_items: new Color(0.2, 0.2, 0.2, 1),
+  anchor: new Color(0, 0, 1, 1),
+  shadow: new Color(0.6, 0.6, 0.6, 0.5),
+  bus_junction: new Color(0, 0.8, 0, 1),
 };
 
 export interface RenderOptions {
@@ -114,14 +163,14 @@ class AlphaCanvas2DRenderer extends Canvas2DRenderer {
     }
 
     this.ctx2d = ctx2d;
-    this.update_canvas_size();
   }
 
   override clear_canvas() {
-    this.update_canvas_size();
-
     this.ctx2d!.setTransform();
-    this.ctx2d!.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    // Don't apply device pixel ratio scaling here - let the canvas handle it naturally
+    // This was causing double-scaling in VSCode's webview environment
+    // this.ctx2d!.scale(window.devicePixelRatio, window.devicePixelRatio);
 
     // Clear with transparent background if alpha is 0
     if (this.background_color.a === 0) {
@@ -159,24 +208,20 @@ export class KicadSymRenderer {
   }
 
   /**
-   * Parse a kicad_sym file content and extract symbols
+   * Parse a single symbol s-expression
    */
   parseKicadSym(content: string): LibSymbol[] {
-    // A kicad_sym file has the structure:
-    // (kicad_symbol_lib (version ...) (generator ...)
-    //   (symbol "name" ...)
-    //   (symbol "name2" ...)
-    // )
+    // The content is now a single symbol s-expression:
+    // (symbol "name" ...)
 
-    const parsed = parse_expr(
-      content,
-      P.start("kicad_symbol_lib"),
-      P.pair("version", T.number),
-      P.pair("generator", T.string),
-      P.collection("symbols", "symbol", T.item(LibSymbol))
-    );
-
-    return parsed["symbols"] || [];
+    try {
+      // Create a LibSymbol directly from the string
+      const symbol = new LibSymbol(content as any);
+      return [symbol];
+    } catch (error) {
+      console.error("Failed to parse symbol:", error);
+      return [];
+    }
   }
 
   /**
@@ -1091,15 +1136,6 @@ export class KicadSymRenderer {
               pin.length
             );
             points.push(p0);
-
-            // Include pin text bounds if requested
-            // if (
-            //   includePinTextInBounds &&
-            //   (this.showPinNames || this.showPinNumbers)
-            // ) {
-            //   const textPoints = this.calculatePinTextBounds(pinInfo, symbol);
-            //   points.push(...textPoints);
-            // }
           }
         }
       };

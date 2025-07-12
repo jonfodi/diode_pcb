@@ -14,7 +14,7 @@ pub(crate) struct ModuleConverter {
     schematic: Schematic,
     net_to_ports: HashMap<NetId, Vec<InstanceRef>>,
     net_to_name: HashMap<NetId, String>,
-    net_to_properties: HashMap<NetId, HashMap<String, FrozenValue>>,
+    net_to_properties: HashMap<NetId, HashMap<String, AttributeValue>>,
     refdes_counters: HashMap<String, u32>,
 }
 
@@ -245,7 +245,7 @@ impl ModuleConverter {
             // Determine net kind from properties.
             let net_kind = if let Some(props) = self.net_to_properties.get(&info.id) {
                 if let Some(type_prop) = props.get("type") {
-                    match type_prop.to_value().unpack_str() {
+                    match type_prop.string() {
                         Some("ground") => NetKind::Ground,
                         Some("power") => NetKind::Power,
                         _ => NetKind::Normal,
@@ -265,7 +265,7 @@ impl ModuleConverter {
             // Add properties to the net.
             if let Some(props) = self.net_to_properties.get(&info.id) {
                 for (key, value) in props.iter() {
-                    net.add_property(key.clone(), to_attribute_value(*value)?);
+                    net.add_property(key.clone(), value.clone());
                 }
             }
 
@@ -306,7 +306,7 @@ impl ModuleConverter {
     ) -> anyhow::Result<()> {
         // Create instance for this module type.
         let type_modref = ModuleRef::new(module.source_path(), "<root>");
-        let mut inst = Instance::module(type_modref);
+        let mut inst = Instance::module(type_modref.clone());
 
         // Add only this module's own properties to this instance.
         for (key, val) in module.properties().iter() {
@@ -336,6 +336,39 @@ impl ModuleConverter {
             }
         }
 
+        // Process the module's signature (io() parameters) and add them as children
+        for (param_name, param_type) in module.signature().iter() {
+            let param_inst_ref = instance_ref.append(param_name.clone());
+
+            // Check if this is a Net type
+            if let Some(net) = param_type.downcast_ref::<crate::lang::net::FrozenNetValue>() {
+                // Create a port instance for the net
+                let port_inst = Instance::port(type_modref.clone());
+
+                // Record this net in our tracking
+                self.update_net(net, &param_inst_ref);
+
+                // Add the port instance to the schematic
+                self.schematic
+                    .add_instance(param_inst_ref.clone(), port_inst);
+                inst.add_child(param_name.clone(), param_inst_ref);
+            }
+            // Check if this is an Interface type
+            else if let Some(_interface) =
+                param_type.downcast_ref::<crate::lang::interface::FrozenInterfaceValue>()
+            {
+                // Create an interface instance
+                let interface_inst = Instance::interface(type_modref.clone());
+
+                // Add the interface instance to the schematic
+                self.schematic
+                    .add_instance(param_inst_ref.clone(), interface_inst);
+                inst.add_child(param_name.clone(), param_inst_ref);
+            }
+            // For other types (like enums, records, etc.), we skip them for now
+            // as they're not represented in the schematic
+        }
+
         // Recurse into children, but don't pass any properties down.
         // Each module/component should only have its own properties.
         for child in module.children().iter() {
@@ -362,12 +395,47 @@ impl ModuleConverter {
         entry.push(instance_ref.clone());
         self.net_to_name.insert(net.id(), net.name().to_string());
 
-        // Store net properties if not already stored
+        // Store net properties if not already stored, including symbol information
         self.net_to_properties.entry(net.id()).or_insert_with(|| {
             let mut props_map = HashMap::new();
+
+            // Convert regular properties to AttributeValue
             for (key, value) in net.properties().iter() {
-                props_map.insert(key.clone(), *value);
+                if let Ok(attr_value) = to_attribute_value(*value) {
+                    props_map.insert(key.clone(), attr_value);
+                }
             }
+
+            // Add symbol information if present
+            // let symbol_value = net.symbol();
+            // if !symbol_value.is_none() {
+            //     if let Some(symbol) =
+            //         symbol_value.downcast_ref::<crate::lang::symbol::FrozenSymbolValue>()
+            //     {
+            //         props_map.insert(
+            //             "symbol_name".to_string(),
+            //             AttributeValue::String(symbol.name().to_string()),
+            //         );
+            //         if let Some(path) = symbol.source_path() {
+            //             props_map.insert(
+            //                 "symbol_path".to_string(),
+            //                 AttributeValue::String(path.to_string()),
+            //             );
+            //         }
+            //         // Add the raw s-expression if available
+            //         let raw_sexp = symbol.raw_sexp();
+            //         if !raw_sexp.is_none() {
+            //             // The raw_sexp is stored as a string value in the SymbolValue
+            //             if let Some(sexp_string) = raw_sexp.to_value().unpack_str() {
+            //                 props_map.insert(
+            //                     "__symbol_value".to_string(),
+            //                     AttributeValue::String(sexp_string.to_string()),
+            //                 );
+            //             }
+            //         }
+            // }
+            // }
+
             props_map
         });
     }
@@ -403,6 +471,40 @@ impl ModuleConverter {
         // Add any properties defined directly on the component.
         for (key, val) in component.properties().iter() {
             comp_inst.add_attribute(key.clone(), to_attribute_value(*val)?);
+        }
+
+        // Add symbol information if the component has a symbol
+        let symbol_value = component.symbol();
+        if !symbol_value.is_none() {
+            if let Some(symbol) =
+                symbol_value.downcast_ref::<crate::lang::symbol::FrozenSymbolValue>()
+            {
+                // Add symbol_name for backwards compatibility
+                comp_inst.add_attribute(
+                    "symbol_name".to_string(),
+                    AttributeValue::String(symbol.name().to_string()),
+                );
+
+                // Add symbol_path for backwards compatibility
+                if let Some(path) = symbol.source_path() {
+                    comp_inst.add_attribute(
+                        "symbol_path".to_string(),
+                        AttributeValue::String(path.to_string()),
+                    );
+                }
+
+                // Add the raw s-expression if available
+                let raw_sexp = symbol.raw_sexp();
+                if !raw_sexp.is_none() {
+                    // The raw_sexp is stored as a string value in the SymbolValue
+                    if let Some(sexp_string) = raw_sexp.to_value().unpack_str() {
+                        comp_inst.add_attribute(
+                            "__symbol_value".to_string(),
+                            AttributeValue::String(sexp_string.to_string()),
+                        );
+                    }
+                }
+            }
         }
 
         comp_inst.set_reference_designator(self.next_refdes(component.prefix()));
