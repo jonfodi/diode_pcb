@@ -1,293 +1,28 @@
-use once_cell::sync::Lazy;
-use pcb_zen_core::{FileProvider, LoadResolver};
-use serde::Deserialize;
+use pcb_zen_core::LoadSpec;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 #[cfg(windows)]
 use std::os::windows::fs as win_fs;
 
-/// Default tag that is assumed when the caller does not specify one in a
-/// package spec, e.g. `@mypkg/utils.zen`.
-pub(crate) const DEFAULT_PKG_TAG: &str = "latest";
+// Re-export constants from LoadSpec for backward compatibility
+pub use pcb_zen_core::load_spec::{DEFAULT_GITHUB_REV, DEFAULT_GITLAB_REV, DEFAULT_PKG_TAG};
 
-/// Default git revision that is assumed when the caller omits one in a GitHub
-/// spec, e.g. `@github/user/repo/path.zen`.
-pub(crate) const DEFAULT_GITHUB_REV: &str = "HEAD";
-
-/// Default git revision that is assumed when the caller omits one in a GitLab
-/// spec, e.g. `@gitlab/user/repo/path.zen`.
-pub(crate) const DEFAULT_GITLAB_REV: &str = "HEAD";
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LoadSpec {
-    Package {
-        package: String,
-        tag: String,
-        path: PathBuf,
-    },
-    Github {
-        user: String,
-        repo: String,
-        rev: String,
-        path: PathBuf,
-    },
-    Gitlab {
-        project_path: String, // Can be "user/repo" or "group/subgroup/repo"
-        rev: String,
-        path: PathBuf,
-    },
-}
-
-/// Parse the raw string passed to `load()` into a [`LoadSpec`].
+/// Download and cache remote resources (Package, GitHub, GitLab specs).
 ///
-/// The supported grammar is:
-///
-/// • **Package reference** – `"@<package>[:<tag>]/<optional/path>"`.
-///   If `<tag>` is omitted the [`DEFAULT_PKG_TAG`] (currently `"latest"`) is
-///   assumed.
-///   Example: `"@stdlib:1.2.3/math.zen"` or `"@stdlib/math.zen"`.
-///
-/// • **GitHub repository** –
-///   `"@github/<user>/<repo>[:<rev>]/<path>"`.
-///   If `<rev>` is omitted the special value [`DEFAULT_GITHUB_REV`] (currently
-///   `"HEAD"`) is assumed.
-///   The `<rev>` component can be a branch name, tag, or a short/long commit
-///   SHA (7–40 hexadecimal characters).
-///   Example: `"@github/foo/bar:abc123/scripts/build.zen".
-///
-/// • **GitLab repository** –
-///   `"@gitlab/<user>/<repo>[:<rev>]/<path>"`.
-///   If `<rev>` is omitted the special value [`DEFAULT_GITLAB_REV`] (currently
-///   `"HEAD"`) is assumed.
-///   The `<rev>` component can be a branch name, tag, or a short/long commit
-///   SHA (7–40 hexadecimal characters).
-///   
-///   For nested groups, include the full path before the revision:
-///   `"@gitlab/group/subgroup/repo:rev/path"`.
-///   Without a revision, the first two path components are assumed to be the project path.
-///   
-///   Examples:
-///   - `"@gitlab/foo/bar:main/src/lib.zen"` - Simple user/repo with revision
-///   - `"@gitlab/foo/bar/src/lib.zen"` - Simple user/repo without revision (assumes HEAD)
-///   - `"@gitlab/kicad/libraries/kicad-symbols:main/Device.kicad_sym"` - Nested groups with revision
-///
-/// The function does not touch the filesystem – it only performs syntactic
-/// parsing.
-pub fn parse_load_spec(s: &str) -> Option<LoadSpec> {
-    if let Some(rest) = s.strip_prefix("@github/") {
-        // GitHub: @github/user/repo:rev/path  (must come before generic "@pkg" handling)
-        let mut user_repo_rev_and_path = rest.splitn(3, '/');
-        let user = user_repo_rev_and_path.next().unwrap_or("").to_string();
-        let repo_and_rev = user_repo_rev_and_path.next().unwrap_or("");
-        let remaining_path = user_repo_rev_and_path.next().unwrap_or("");
-
-        let (repo, rev) = if let Some((repo, rev)) = repo_and_rev.split_once(':') {
-            (repo.to_string(), rev.to_string())
-        } else {
-            (repo_and_rev.to_string(), DEFAULT_GITHUB_REV.to_string())
-        };
-
-        Some(LoadSpec::Github {
-            user,
-            repo,
-            rev,
-            path: PathBuf::from(remaining_path),
-        })
-    } else if let Some(rest) = s.strip_prefix("@gitlab/") {
-        // GitLab: @gitlab/group/subgroup/repo:rev/path
-        // We need to find where the project path ends and the file path begins
-        // This is tricky because both can contain slashes
-
-        // First, check if there's a revision marker ':'
-        if let Some(colon_pos) = rest.find(':') {
-            // We have a revision specified
-            let project_part = &rest[..colon_pos];
-            let after_colon = &rest[colon_pos + 1..];
-
-            // Find the first slash after the colon to separate rev from path
-            if let Some(slash_pos) = after_colon.find('/') {
-                let rev = after_colon[..slash_pos].to_string();
-                let file_path = after_colon[slash_pos + 1..].to_string();
-
-                Some(LoadSpec::Gitlab {
-                    project_path: project_part.to_string(),
-                    rev,
-                    path: PathBuf::from(file_path),
-                })
-            } else {
-                // No file path after revision
-                Some(LoadSpec::Gitlab {
-                    project_path: project_part.to_string(),
-                    rev: after_colon.to_string(),
-                    path: PathBuf::new(),
-                })
-            }
-        } else {
-            // No revision specified, assume first 2 parts are the project path
-            let parts: Vec<&str> = rest.splitn(3, '/').collect();
-            if parts.len() >= 2 {
-                let project_path = format!("{}/{}", parts[0], parts[1]);
-                let file_path = parts.get(2).unwrap_or(&"").to_string();
-
-                Some(LoadSpec::Gitlab {
-                    project_path,
-                    rev: DEFAULT_GITLAB_REV.to_string(),
-                    path: PathBuf::from(file_path),
-                })
-            } else {
-                None
-            }
-        }
-    } else if let Some(rest) = s.strip_prefix('@') {
-        // Generic package: @<pkg>[:<tag>]/optional/path
-        // rest looks like "pkg[:tag]/path..." or just "pkg"/"pkg:tag"
-        let mut parts = rest.splitn(2, '/');
-        let pkg_and_tag = parts.next().unwrap_or("");
-        let rel_path = parts.next().unwrap_or("");
-
-        let (package, tag) = if let Some((pkg, tag)) = pkg_and_tag.split_once(':') {
-            (pkg.to_string(), tag.to_string())
-        } else {
-            (pkg_and_tag.to_string(), DEFAULT_PKG_TAG.to_string())
-        };
-
-        Some(LoadSpec::Package {
-            package,
-            tag,
-            path: PathBuf::from(rel_path),
-        })
-    } else {
-        None
-    }
-}
-
-/// Ensure that the resource referenced by `spec` exists on the **local**
-/// filesystem and return its absolute path.
-///
-/// * **Local** specs are returned unchanged.
-/// * **Package**, **GitHub**, and **GitLab** specs are fetched (and cached) under the
-///   user's cache directory on first use. Subsequent invocations will reuse
-///   the cached copy.
+/// This function only handles remote specs - local paths should be resolved
+/// by the CoreLoadResolver before reaching this function.
 ///
 /// The returned path is guaranteed to exist on success.
-pub fn materialise_load(spec: &LoadSpec, workspace_root: Option<&Path>) -> anyhow::Result<PathBuf> {
-    if let LoadSpec::Package { package, tag, path } = spec {
-        // Check for package alias (workspace or default)
-        if let Some(target) = lookup_package_alias(workspace_root, package) {
-            // Build new load string by appending any extra path the caller asked for.
-            let mut new_spec_str = target.clone();
-
-            // Check if the alias target is a load spec
-            if let Some(mut new_spec) = parse_load_spec(&new_spec_str) {
-                // If caller explicitly specified a tag (non-default), override the alias's tag
-                if tag != DEFAULT_PKG_TAG {
-                    match &mut new_spec {
-                        LoadSpec::Package { tag: alias_tag, .. } => {
-                            *alias_tag = tag.clone();
-                        }
-                        LoadSpec::Github { rev: alias_rev, .. } => {
-                            *alias_rev = tag.clone();
-                        }
-                        LoadSpec::Gitlab { rev: alias_rev, .. } => {
-                            *alias_rev = tag.clone();
-                        }
-                    }
-                }
-
-                // Now append the path if needed
-                match &mut new_spec {
-                    LoadSpec::Package {
-                        path: alias_path, ..
-                    } => {
-                        if !path.as_os_str().is_empty() {
-                            *alias_path = alias_path.join(path);
-                        }
-                    }
-                    LoadSpec::Github {
-                        path: alias_path, ..
-                    } => {
-                        if !path.as_os_str().is_empty() {
-                            *alias_path = alias_path.join(path);
-                        }
-                    }
-                    LoadSpec::Gitlab {
-                        path: alias_path, ..
-                    } => {
-                        if !path.as_os_str().is_empty() {
-                            *alias_path = alias_path.join(path);
-                        }
-                    }
-                }
-
-                // Recurse to resolve the modified spec
-                let resolved_path = materialise_load(&new_spec, workspace_root)?;
-
-                // Attempt to expose in .pcb folder via symlink if we have a workspace.
-                if let Some(root) = workspace_root {
-                    if let Err(e) = expose_alias_symlink(root, package, path, &resolved_path) {
-                        log::debug!("failed to create alias symlink: {e}");
-                    }
-                }
-
-                return Ok(resolved_path);
-            } else {
-                // It's a local path
-                if !path.as_os_str().is_empty() {
-                    new_spec_str = format!(
-                        "{}/{}",
-                        new_spec_str.trim_end_matches('/'),
-                        path.to_string_lossy()
-                    );
-                }
-
-                // If caller explicitly specified a tag (non-default) we warn since local paths don't support tags
-                if tag != DEFAULT_PKG_TAG {
-                    log::warn!("ignoring tag '{tag}' on local alias '{package}' - local paths don't support tags");
-                }
-
-                // It's a local path - resolve it relative to the workspace root
-                if let Some(root) = workspace_root {
-                    let local_path = if Path::new(&new_spec_str).is_absolute() {
-                        PathBuf::from(&new_spec_str)
-                    } else {
-                        root.join(&new_spec_str)
-                    };
-
-                    // Canonicalize to handle .. and symlinks
-                    let canonical_path = local_path.canonicalize().map_err(|e| {
-                        anyhow::anyhow!("Failed to resolve local alias '{}': {}", new_spec_str, e)
-                    })?;
-
-                    if !canonical_path.exists() {
-                        anyhow::bail!(
-                            "Local alias target does not exist: {}",
-                            canonical_path.display()
-                        );
-                    }
-
-                    // Attempt to expose in .pcb folder via symlink
-                    if let Err(e) = expose_alias_symlink(root, package, path, &canonical_path) {
-                        log::debug!("failed to create alias symlink: {e}");
-                    }
-
-                    return Ok(canonical_path);
-                } else {
-                    anyhow::bail!(
-                        "Cannot resolve local alias '{}' without a workspace root",
-                        new_spec_str
-                    );
-                }
-            }
-        }
-        // No alias match – proceed with normal package handling below, but ensure we expose a symlink afterwards.
-    }
-
+fn materialise_remote(spec: &LoadSpec, workspace_root: Option<&Path>) -> anyhow::Result<PathBuf> {
     match spec {
+        LoadSpec::Path { .. } | LoadSpec::WorkspacePath { .. } => {
+            // Local specs should not reach here
+            anyhow::bail!("materialise_remote only handles remote specs, not local paths")
+        }
         LoadSpec::Package { package, tag, path } => {
             let cache_root = cache_dir()?.join("packages").join(package).join(tag);
 
@@ -311,10 +46,9 @@ pub fn materialise_load(spec: &LoadSpec, workspace_root: Option<&Path>) -> anyho
                 );
             }
 
-            // Expose in .pcb for direct package reference (non-alias)
+            // Expose in .pcb for direct package reference
             if let Some(root) = workspace_root {
-                let rel_path = path.clone();
-                let _ = expose_alias_symlink(root, package, &rel_path, &local_path);
+                let _ = expose_alias_symlink(root, package, path, &local_path);
             }
 
             Ok(local_path)
@@ -791,102 +525,6 @@ fn git_is_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Walk up the directory tree starting at `start` until a directory containing
-/// `pcb.toml` is found. Returns `Some(PathBuf)` pointing at that directory or
-/// `None` if we reach the filesystem root without finding one.
-pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
-    let mut current = if start.is_file() {
-        // For files we search from their parent directory.
-        start.parent()
-    } else {
-        Some(start)
-    };
-
-    while let Some(dir) = current {
-        if dir.join("pcb.toml").exists() {
-            return Some(dir.to_path_buf());
-        }
-        current = dir.parent();
-    }
-    None
-}
-
-// Package alias helpers
-
-/// Default package aliases that are always available
-fn default_package_aliases() -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
-    map.insert(
-        "kicad-symbols".to_string(),
-        "@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string(),
-    );
-    map.insert(
-        "kicad-footprints".to_string(),
-        "@gitlab/kicad/libraries/kicad-footprints:9.0.0".to_string(),
-    );
-    map.insert(
-        "stdlib".to_string(),
-        "@github/diodeinc/stdlib:HEAD".to_string(),
-    );
-    map
-}
-
-/// Thread-safe cache: workspace root → alias map.
-static ALIAS_CACHE: Lazy<
-    Mutex<std::collections::HashMap<PathBuf, std::collections::HashMap<String, String>>>,
-> = Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
-
-/// Return the package alias map for the given workspace root. Parsed once and cached.
-fn package_aliases(root: &Path) -> std::collections::HashMap<String, String> {
-    // Canonicalize the root path to ensure consistent cache keys
-    // This is important on systems where /tmp might be a symlink
-    let canonical_root = match root.canonicalize() {
-        Ok(path) => path,
-        Err(_) => {
-            // If canonicalization fails, fall back to the original path
-            // This might happen if the directory doesn't exist yet
-            root.to_path_buf()
-        }
-    };
-
-    let mut guard = ALIAS_CACHE.lock().expect("alias cache poisoned");
-    if let Some(map) = guard.get(&canonical_root) {
-        return map.clone();
-    }
-
-    // Start with default aliases
-    let mut map = default_package_aliases();
-
-    let toml_path = root.join("pcb.toml");
-    if let Ok(contents) = std::fs::read_to_string(&toml_path) {
-        // Deserialize only the [packages] table to avoid large structs.
-        #[derive(Debug, Deserialize)]
-        struct PkgRoot {
-            packages: Option<std::collections::HashMap<String, String>>,
-        }
-
-        if let Ok(parsed) = toml::from_str::<PkgRoot>(&contents) {
-            if let Some(pkgs) = parsed.packages {
-                // User's aliases override defaults
-                map.extend(pkgs);
-            }
-        }
-    }
-
-    guard.insert(canonical_root, map.clone());
-    map
-}
-
-/// Look up an alias (package name). Returns mapped string if present.
-/// If root is None, only checks default aliases.
-/// If root is Some, checks workspace aliases (which include defaults).
-fn lookup_package_alias(root: Option<&Path>, alias: &str) -> Option<String> {
-    match root {
-        Some(r) => package_aliases(r).get(alias).cloned(),
-        None => default_package_aliases().get(alias).cloned(),
-    }
-}
-
 // Create a symlink inside `<workspace>/.pcb/<alias>/<sub_path>` pointing to `target`.
 fn expose_alias_symlink(
     workspace_root: &Path,
@@ -933,14 +571,40 @@ fn looks_like_git_sha(rev: &str) -> bool {
     rev.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-// Add unit tests for parse_load_spec
+// Re-export for backward compatibility
+/// Walk up the directory tree starting at `start` until a directory containing
+/// `pcb.toml` is found. Returns `Some(PathBuf)` pointing at that directory or
+/// `None` if we reach the filesystem root without finding one.
+///
+/// This is a convenience wrapper that uses the default file provider.
+pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+    let file_provider = pcb_zen_core::DefaultFileProvider;
+    pcb_zen_core::workspace::find_workspace_root(&file_provider, start)
+}
+
+/// Default implementation of RemoteFetcher that handles downloading and caching
+/// remote resources (GitHub repos, GitLab repos, packages).
+#[derive(Debug, Clone)]
+pub struct DefaultRemoteFetcher;
+
+impl pcb_zen_core::RemoteFetcher for DefaultRemoteFetcher {
+    fn fetch_remote(
+        &self,
+        spec: &LoadSpec,
+        workspace_root: Option<&Path>,
+    ) -> Result<PathBuf, anyhow::Error> {
+        // Use the existing materialise_load function
+        materialise_remote(spec, workspace_root)
+    }
+}
+// Add unit tests for LoadSpec::parse
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parses_package_without_tag() {
-        let spec = parse_load_spec("@stdlib/math.zen");
+        let spec = LoadSpec::parse("@stdlib/math.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Package {
@@ -953,7 +617,7 @@ mod tests {
 
     #[test]
     fn parses_package_with_tag_and_root_path() {
-        let spec = parse_load_spec("@stdlib:1.2.3");
+        let spec = LoadSpec::parse("@stdlib:1.2.3");
         assert_eq!(
             spec,
             Some(LoadSpec::Package {
@@ -966,7 +630,7 @@ mod tests {
 
     #[test]
     fn parses_github_with_rev_and_path() {
-        let spec = parse_load_spec("@github/foo/bar:abc123/scripts/build.zen");
+        let spec = LoadSpec::parse("@github/foo/bar:abc123/scripts/build.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Github {
@@ -980,7 +644,7 @@ mod tests {
 
     #[test]
     fn parses_github_without_rev() {
-        let spec = parse_load_spec("@github/foo/bar/scripts/build.zen");
+        let spec = LoadSpec::parse("@github/foo/bar/scripts/build.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Github {
@@ -994,7 +658,7 @@ mod tests {
 
     #[test]
     fn parses_github_repo_root_with_rev() {
-        let spec = parse_load_spec("@github/foo/bar:main");
+        let spec = LoadSpec::parse("@github/foo/bar:main");
         assert_eq!(
             spec,
             Some(LoadSpec::Github {
@@ -1010,7 +674,7 @@ mod tests {
     fn parses_github_repo_root_with_long_commit() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let input = format!("@github/foo/bar:{sha}");
-        let spec = parse_load_spec(&input);
+        let spec = LoadSpec::parse(&input);
         assert_eq!(
             spec,
             Some(LoadSpec::Github {
@@ -1024,7 +688,7 @@ mod tests {
 
     #[test]
     fn parses_gitlab_with_rev_and_path() {
-        let spec = parse_load_spec("@gitlab/foo/bar:abc123/scripts/build.zen");
+        let spec = LoadSpec::parse("@gitlab/foo/bar:abc123/scripts/build.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1037,7 +701,7 @@ mod tests {
 
     #[test]
     fn parses_gitlab_without_rev() {
-        let spec = parse_load_spec("@gitlab/foo/bar/scripts/build.zen");
+        let spec = LoadSpec::parse("@gitlab/foo/bar/scripts/build.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1050,7 +714,7 @@ mod tests {
 
     #[test]
     fn parses_gitlab_repo_root_with_rev() {
-        let spec = parse_load_spec("@gitlab/foo/bar:main");
+        let spec = LoadSpec::parse("@gitlab/foo/bar:main");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1065,7 +729,7 @@ mod tests {
     fn parses_gitlab_repo_root_with_long_commit() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let input = format!("@gitlab/foo/bar:{sha}");
-        let spec = parse_load_spec(&input);
+        let spec = LoadSpec::parse(&input);
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1078,7 +742,7 @@ mod tests {
 
     #[test]
     fn parses_gitlab_nested_groups_with_rev() {
-        let spec = parse_load_spec("@gitlab/kicad/libraries/kicad-symbols:main/Device.kicad_sym");
+        let spec = LoadSpec::parse("@gitlab/kicad/libraries/kicad-symbols:main/Device.kicad_sym");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1092,7 +756,7 @@ mod tests {
     #[test]
     fn parses_gitlab_simple_without_rev_with_file_path() {
         // Without revision, first 2 parts are project
-        let spec = parse_load_spec("@gitlab/user/repo/src/main.zen");
+        let spec = LoadSpec::parse("@gitlab/user/repo/src/main.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1105,7 +769,7 @@ mod tests {
 
     #[test]
     fn parses_gitlab_nested_groups_no_file() {
-        let spec = parse_load_spec("@gitlab/kicad/libraries/kicad-symbols:v7.0.0");
+        let spec = LoadSpec::parse("@gitlab/kicad/libraries/kicad-symbols:v7.0.0");
         assert_eq!(
             spec,
             Some(LoadSpec::Gitlab {
@@ -1147,11 +811,8 @@ mod tests {
 
     #[test]
     fn default_package_aliases() {
-        use tempfile::tempdir;
-
-        // Test 1: Default aliases work without pcb.toml
-        let temp_dir = tempdir().unwrap();
-        let aliases = package_aliases(temp_dir.path());
+        // Test that default aliases are available
+        let aliases = pcb_zen_core::LoadSpec::default_package_aliases();
 
         assert_eq!(
             aliases.get("kicad-symbols"),
@@ -1161,110 +822,27 @@ mod tests {
             aliases.get("stdlib"),
             Some(&"@github/diodeinc/stdlib:HEAD".to_string())
         );
-
-        // Test 2: User can override defaults in pcb.toml
-        let pcb_toml = temp_dir.path().join("pcb.toml");
-        std::fs::write(
-            &pcb_toml,
-            r#"
-[packages]
-kicad-symbols = "@gitlab/kicad/libraries/kicad-symbols:7.0.0"
-custom = "@github/myuser/myrepo:main"
-"#,
-        )
-        .unwrap();
-
-        // Clear cache to force reload
-        ALIAS_CACHE.lock().unwrap().clear();
-
-        let aliases = package_aliases(temp_dir.path());
-
-        // User's version overrides default
-        assert_eq!(
-            aliases.get("kicad-symbols"),
-            Some(&"@gitlab/kicad/libraries/kicad-symbols:7.0.0".to_string())
-        );
-        // Default still present
-        assert_eq!(
-            aliases.get("stdlib"),
-            Some(&"@github/diodeinc/stdlib:HEAD".to_string())
-        );
-        // Custom alias added
-        assert_eq!(
-            aliases.get("custom"),
-            Some(&"@github/myuser/myrepo:main".to_string())
-        );
     }
 
     #[test]
     fn default_aliases_without_workspace() {
-        // Test that default aliases work even without a workspace
+        // Test that default aliases work
+        let aliases = pcb_zen_core::LoadSpec::default_package_aliases();
 
         // Test kicad-symbols alias
         assert_eq!(
-            lookup_package_alias(None, "kicad-symbols"),
-            Some("@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string())
+            aliases.get("kicad-symbols"),
+            Some(&"@gitlab/kicad/libraries/kicad-symbols:9.0.0".to_string())
         );
 
         // Test stdlib alias
         assert_eq!(
-            lookup_package_alias(None, "stdlib"),
-            Some("@github/diodeinc/stdlib:HEAD".to_string())
+            aliases.get("stdlib"),
+            Some(&"@github/diodeinc/stdlib:HEAD".to_string())
         );
 
         // Test non-existent alias
-        assert_eq!(lookup_package_alias(None, "nonexistent"), None);
-    }
-
-    #[test]
-    fn package_aliases_with_symlinks() {
-        use tempfile::tempdir;
-
-        // Create two temp directories
-        let real_dir = tempdir().unwrap();
-        let link_dir = tempdir().unwrap();
-
-        // Create a pcb.toml in the real directory
-        let pcb_toml = real_dir.path().join("pcb.toml");
-        std::fs::write(
-            &pcb_toml,
-            r#"
-[packages]
-test_alias = "@github/test/repo:main"
-"#,
-        )
-        .unwrap();
-
-        // Create a symlink to the real directory
-        let symlink_path = link_dir.path().join("symlink");
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(real_dir.path(), &symlink_path).unwrap();
-        }
-        #[cfg(windows)]
-        {
-            std::os::windows::fs::symlink_dir(real_dir.path(), &symlink_path).unwrap();
-        }
-
-        // Clear the cache to ensure fresh lookups
-        ALIAS_CACHE.lock().unwrap().clear();
-
-        // Get aliases using the real path
-        let aliases_real = package_aliases(real_dir.path());
-        assert_eq!(
-            aliases_real.get("test_alias"),
-            Some(&"@github/test/repo:main".to_string())
-        );
-
-        // Get aliases using the symlink path - should return the same cached result
-        let aliases_link = package_aliases(&symlink_path);
-        assert_eq!(
-            aliases_link.get("test_alias"),
-            Some(&"@github/test/repo:main".to_string())
-        );
-
-        // Verify both calls returned the same HashMap (from cache)
-        assert_eq!(aliases_real, aliases_link);
+        assert_eq!(aliases.get("nonexistent"), None);
     }
 
     #[test]
@@ -1272,7 +850,7 @@ test_alias = "@github/test/repo:main"
         // Test that custom tags override the default alias tags
 
         // Test 1: Package alias with tag override
-        let spec = parse_load_spec("@stdlib:zen/math.zen");
+        let spec = LoadSpec::parse("@stdlib:zen/math.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Package {
@@ -1283,7 +861,7 @@ test_alias = "@github/test/repo:main"
         );
 
         // Test 2: Verify that default tag is used when not specified
-        let spec = parse_load_spec("@stdlib/math.zen");
+        let spec = LoadSpec::parse("@stdlib/math.zen");
         assert_eq!(
             spec,
             Some(LoadSpec::Package {
@@ -1294,7 +872,7 @@ test_alias = "@github/test/repo:main"
         );
 
         // Test 3: KiCad symbols with custom version
-        let spec = parse_load_spec("@kicad-symbols:8.0.0/Device.kicad_sym");
+        let spec = LoadSpec::parse("@kicad-symbols:8.0.0/Device.kicad_sym");
         assert_eq!(
             spec,
             Some(LoadSpec::Package {
@@ -1303,29 +881,5 @@ test_alias = "@github/test/repo:main"
                 path: PathBuf::from("Device.kicad_sym"),
             })
         );
-    }
-}
-
-/// Load resolver that handles loading files from remote dependencies.
-#[derive(Debug, Clone)]
-pub struct RemoteLoadResolver;
-
-impl LoadResolver for RemoteLoadResolver {
-    fn resolve_path(
-        &self,
-        _file_provider: &dyn FileProvider,
-        load_path: &str,
-        current_file: &std::path::Path,
-    ) -> Result<std::path::PathBuf, anyhow::Error> {
-        // Parse the load spec
-        if let Some(spec) = parse_load_spec(load_path) {
-            // Find workspace root starting from the current file
-            let workspace_root = find_workspace_root(current_file);
-
-            // Materialize the load (download if needed)
-            materialise_load(&spec, workspace_root.as_deref())
-        } else {
-            anyhow::bail!("Invalid load spec: {}", load_path);
-        }
     }
 }

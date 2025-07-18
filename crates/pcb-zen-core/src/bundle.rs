@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::{FileProvider, LoadResolver};
+use crate::{FileProvider, LoadResolver, LoadSpec};
 
 /// Runtime representation of a bundle with additional metadata
 #[derive(Debug, Clone)]
@@ -78,39 +78,32 @@ impl BundleLoadResolver {
 }
 
 impl LoadResolver for BundleLoadResolver {
-    fn resolve_path(
+    fn resolve_spec(
         &self,
-        file_provider: &dyn FileProvider,
-        load_path: &str,
+        _file_provider: &dyn FileProvider,
+        spec: &LoadSpec,
         current_file: &Path,
     ) -> Result<PathBuf> {
-        let canonical_current_file = file_provider.canonicalize(current_file)?;
-        let stripped_current_file = canonical_current_file
-            .strip_prefix(&self.bundle.bundle_path)
-            .unwrap_or(canonical_current_file.as_path());
+        // Convert current_file to a string key for the load map
+        let current_file_str = current_file.to_string_lossy().to_string();
 
-        log::debug!(
-            "Resolving path: {} from file: {}",
-            load_path,
-            stripped_current_file.display()
-        );
+        // Convert the spec to a load string to use as the inner key
+        let load_spec_str = spec.to_load_string();
 
-        let load_map = self
-            .bundle
-            .manifest
-            .load_map
-            .get(stripped_current_file.to_string_lossy().as_ref());
-
-        log::debug!("Load map: {load_map:?}");
-
-        if let Some(load_map) = load_map {
-            let resolved_path = load_map.get(load_path);
-            log::debug!("Load map resolved path: {resolved_path:?}");
-            if let Some(resolved_path) = resolved_path {
-                return Ok(PathBuf::from(resolved_path));
+        // Look up in the bundle's load map
+        if let Some(file_map) = self.bundle.manifest.load_map.get(&current_file_str) {
+            if let Some(resolved_path_str) = file_map.get(&load_spec_str) {
+                // The resolved path is relative to the bundle directory
+                let resolved_path = self.bundle.bundle_path.join(resolved_path_str);
+                return Ok(resolved_path);
             }
         }
 
-        Ok(PathBuf::from(load_path))
+        // If not found in the load map, return an error
+        Err(anyhow::anyhow!(
+            "Load spec '{}' from file '{}' not found in bundle manifest",
+            load_spec_str,
+            current_file_str
+        ))
     }
 }

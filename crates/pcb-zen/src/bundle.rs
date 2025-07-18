@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use pcb_zen_core::bundle::{Bundle, BundleManifest};
+use pcb_zen_core::workspace::find_workspace_root;
 use pcb_zen_core::{
-    CompoundLoadResolver, DefaultFileProvider, EvalContext, FileProvider, InputMap, LoadResolver,
-    RelativeLoadResolver, WorkspaceLoadResolver,
+    CoreLoadResolver, DefaultFileProvider, EvalContext, FileProvider, InputMap, LoadResolver,
 };
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
-use crate::load::RemoteLoadResolver;
+use crate::load::DefaultRemoteFetcher;
 
 /// A LoadResolver that wraps another resolver and tracks all resolved files
 struct BundleTrackingResolver {
@@ -117,16 +117,14 @@ impl BundleTrackingResolver {
 }
 
 impl LoadResolver for BundleTrackingResolver {
-    fn resolve_path(
+    fn resolve_spec(
         &self,
         file_provider: &dyn FileProvider,
-        load_path: &str,
+        spec: &pcb_zen_core::LoadSpec,
         current_file: &Path,
     ) -> Result<PathBuf, anyhow::Error> {
         // First resolve using the inner resolver
-        let resolved_path = self
-            .inner
-            .resolve_path(file_provider, load_path, current_file)?;
+        let resolved_path = self.inner.resolve_spec(file_provider, spec, current_file)?;
 
         // Copy the resolved file to the bundle
         let bundle_path = self.copy_to_bundle(&resolved_path)?;
@@ -145,7 +143,7 @@ impl LoadResolver for BundleTrackingResolver {
                 .replace('\\', "/");
 
             load_map.entry(current_file_key).or_default().insert(
-                load_path.to_string(),
+                spec.to_load_string(),
                 bundle_path.to_string_lossy().replace('\\', "/"),
             );
         }
@@ -228,9 +226,12 @@ pub fn create_bundle(input_path: &Path, output_path: &Path) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Input file has no parent directory"))?
         .to_path_buf();
 
+    // Create the file provider
+    let file_provider = Arc::new(DefaultFileProvider);
+
     // Find the workspace root by looking for pcb.toml, fall back to source dir if not found
-    let workspace_root =
-        crate::load::find_workspace_root(&canonical_input).unwrap_or_else(|| source_dir.clone());
+    let workspace_root = find_workspace_root(file_provider.as_ref(), &canonical_input)
+        .unwrap_or_else(|| source_dir.clone());
 
     // Create a temporary directory for the bundle
     let temp_dir = tempfile::tempdir()?;
@@ -250,13 +251,13 @@ pub fn create_bundle(input_path: &Path, output_path: &Path) -> Result<()> {
         .unwrap()
         .to_path_buf();
 
-    // Create the base load resolver and file provider with the correct workspace root
-    let base_resolver = Arc::new(CompoundLoadResolver::new(vec![
-        Arc::new(RemoteLoadResolver),
-        Arc::new(WorkspaceLoadResolver::new(workspace_root)),
-        Arc::new(RelativeLoadResolver),
-    ]));
-    let file_provider = Arc::new(DefaultFileProvider);
+    // Create the base load resolver with the correct workspace root
+    let remote_fetcher = Arc::new(DefaultRemoteFetcher);
+    let base_resolver = Arc::new(CoreLoadResolver::new(
+        file_provider.clone(),
+        remote_fetcher,
+        Some(workspace_root),
+    ));
 
     // Create a tracking resolver that wraps the base resolver
     let tracking_resolver = Arc::new(BundleTrackingResolver::new(
