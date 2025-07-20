@@ -342,34 +342,75 @@ where
         args: &Arguments<'v, '_>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> starlark::Result<Value<'v>> {
-        let param_spec = ParametersSpec::new_named_only(
+        let param_spec = ParametersSpec::new_parts(
             "Symbol",
+            // One optional positional parameter
+            [("library_spec", ParametersSpecParam::<Value<'_>>::Optional)],
+            // Named parameters
             [
                 ("name", ParametersSpecParam::<Value<'_>>::Optional),
                 ("definition", ParametersSpecParam::<Value<'_>>::Optional),
                 ("library", ParametersSpecParam::<Value<'_>>::Optional),
             ],
+            false,
+            std::iter::empty::<(&str, ParametersSpecParam<_>)>(),
+            false,
         );
 
-        let (name_val, definition_val, library_val) =
+        let (library_spec_val, name_val, definition_val, library_val) =
             param_spec.parser(args, eval, |param_parser, _eval_ctx| {
+                let library_spec_val: Option<Value> = param_parser.next_opt()?;
                 let name_val: Option<String> = param_parser
                     .next_opt()?
                     .and_then(|v: Value<'v>| v.unpack_str().map(|s| s.to_owned()));
-
                 let definition_val: Option<Value> = param_parser.next_opt()?;
-
                 let library_val: Option<String> = param_parser
                     .next_opt()?
                     .and_then(|v: Value<'v>| v.unpack_str().map(|s| s.to_owned()));
 
-                Ok((name_val, definition_val, library_val))
+                Ok((library_spec_val, name_val, definition_val, library_val))
             })?;
 
+        // Check if we have a positional argument in the format "library:name"
+        let (resolved_library, resolved_name) = if let Some(spec_val) = library_spec_val {
+            if let Some(spec_str) = spec_val.unpack_str() {
+                // Check if it contains a colon
+                if let Some(colon_pos) = spec_str.rfind(':') {
+                    // Split into library and name
+                    let lib_part = &spec_str[..colon_pos];
+                    let name_part = &spec_str[colon_pos + 1..];
+
+                    // Make sure we don't have conflicting parameters
+                    if library_val.is_some() || name_val.is_some() {
+                        return Err(starlark::Error::new_other(anyhow!(
+                            "Cannot specify both positional 'library:name' argument and named 'library' or 'name' parameters"
+                        )));
+                    }
+
+                    (Some(lib_part.to_owned()), Some(name_part.to_owned()))
+                } else {
+                    // No colon, treat as library path only
+                    if library_val.is_some() {
+                        return Err(starlark::Error::new_other(anyhow!(
+                            "Cannot specify both positional library argument and named 'library' parameter"
+                        )));
+                    }
+                    // Use positional as library, keep name from named parameter (if any)
+                    (Some(spec_str.to_owned()), name_val)
+                }
+            } else {
+                return Err(starlark::Error::new_other(anyhow!(
+                    "Positional argument must be a string"
+                )));
+            }
+        } else {
+            (library_val, name_val)
+        };
+
         Ok(eval.heap().alloc_complex(SymbolValue::from_args(
-            name_val,
+            resolved_name,
             definition_val,
-            library_val,
+            resolved_library,
             eval.eval_context().unwrap(),
         )?))
     }
