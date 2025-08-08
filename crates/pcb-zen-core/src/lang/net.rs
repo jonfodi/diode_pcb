@@ -13,6 +13,7 @@ use starlark::{
 use std::cell::RefCell;
 
 use super::eval::{copy_value, DeepCopyToHeap};
+use crate::lang::context::ContextValue;
 
 pub type NetId = u64;
 
@@ -251,13 +252,27 @@ where
         // avoids cross-test interference when Rust tests execute in parallel.
         let net_id = generate_net_id();
 
-        // Use positional name if provided, otherwise use kwarg name
-        // Keep name empty when not supplied so that later passes can derive a context-aware
-        // identifier from the net's connections.
+        // Use positional name if provided, otherwise use kwarg name (may be empty).
         let net_name = name_pos.or(name_kwarg).unwrap_or_default();
 
         // Initialize with empty properties map
         let mut properties = SmallMap::new();
+
+        // Register this net with the current module context so its local name is
+        // recorded at creation time. This ensures explicit names like "EN"
+        // are associated with the module where the literal appears.
+        let final_name = if let Some(ctx) = eval
+            .module()
+            .extra_value()
+            .and_then(|e| e.downcast_ref::<ContextValue>())
+        {
+            match ctx.register_net(net_id, &net_name) {
+                Ok(n) => n,
+                Err(e) => return Err(starlark::Error::new_other(anyhow::anyhow!(e.to_string()))),
+            }
+        } else {
+            net_name.clone()
+        };
 
         // If a symbol was provided, extract its properties and add them to the net properties
         if let Some(symbol) = symbol_val {
@@ -284,7 +299,7 @@ where
 
         Ok(heap.alloc(NetValue {
             id: net_id,
-            name: net_name,
+            name: final_name,
             properties,
             symbol: symbol_val.unwrap_or_else(Value::new_none),
         }))

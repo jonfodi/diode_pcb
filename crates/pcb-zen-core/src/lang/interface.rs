@@ -12,6 +12,7 @@ use starlark::values::{
 };
 use std::sync::Arc;
 
+use crate::lang::context::ContextValue;
 use crate::lang::eval::{copy_value, DeepCopyToHeap};
 use crate::lang::net::{generate_net_id, NetValue};
 
@@ -162,9 +163,23 @@ where
                         name.to_ascii_uppercase()
                     };
 
+                    let net_id = generate_net_id();
+                    // Register with current module for duplicate detection and get final name.
+                    let final_name = if let Some(ctx) = eval
+                        .module()
+                        .extra_value()
+                        .and_then(|e| e.downcast_ref::<ContextValue>())
+                    {
+                        ctx.register_net(net_id, &net_name).map_err(|e| {
+                            starlark::Error::new_other(anyhow::anyhow!(e.to_string()))
+                        })?
+                    } else {
+                        net_name.clone()
+                    };
+
                     heap.alloc(NetValue::new(
-                        generate_net_id(),
-                        net_name,
+                        net_id,
+                        final_name,
                         SmallMap::new(),
                         Value::new_none(),
                     ))
@@ -195,7 +210,11 @@ where
                         };
 
                     // Create new net with template name and properties
-                    let net_name = if !template_name.is_empty() {
+                    // Treat auto-generated placeholder names like "N123" as "no template name".
+                    let is_placeholder = template_name.starts_with('N')
+                        && template_name[1..].chars().all(|c| c.is_ascii_digit());
+
+                    let net_name = if !template_name.is_empty() && !is_placeholder {
                         if let Some(ref inst_name) = instance_name_opt {
                             format!("{inst_name}_{template_name}")
                         } else {
@@ -219,12 +238,19 @@ where
                     // Deep copy the symbol
                     let copied_symbol = copy_value(template_symbol, heap)?;
 
-                    heap.alloc(NetValue::new(
-                        generate_net_id(),
-                        net_name,
-                        new_props,
-                        copied_symbol,
-                    ))
+                    let net_id = generate_net_id();
+                    let final_name = if let Some(ctx) = eval
+                        .module()
+                        .extra_value()
+                        .and_then(|e| e.downcast_ref::<ContextValue>())
+                    {
+                        ctx.register_net(net_id, &net_name).map_err(|e| {
+                            starlark::Error::new_other(anyhow::anyhow!(e.to_string()))
+                        })?
+                    } else {
+                        net_name.clone()
+                    };
+                    heap.alloc(NetValue::new(net_id, final_name, new_props, copied_symbol))
                 } else if spec_value.downcast_ref::<InterfaceFactory<'v>>().is_some()
                     || spec_value
                         .downcast_ref::<FrozenInterfaceFactory>()
@@ -232,7 +258,7 @@ where
                 {
                     // Interface factory - instantiate it
                     let child_prefix = instance_name_opt.as_ref().map(|p| make_prefix(p, name));
-                    instantiate_interface(spec_value, child_prefix.as_deref(), heap)?
+                    instantiate_interface(spec_value, child_prefix.as_deref(), heap, eval)?
                 } else if spec_type == "InterfaceValue" {
                     // Interface instance - use as template
                     let factory_val = if let Some(interface_val) =
@@ -254,7 +280,7 @@ where
                     };
 
                     let child_prefix = instance_name_opt.as_ref().map(|p| make_prefix(p, name));
-                    instantiate_interface(factory_val, child_prefix.as_deref(), heap)?
+                    instantiate_interface(factory_val, child_prefix.as_deref(), heap, eval)?
                 } else {
                     return Err(starlark::Error::new_other(anyhow::anyhow!(
                         "Invalid field type: {} for field {}",
@@ -450,8 +476,9 @@ impl<'v, V: ValueLike<'v> + InterfaceCell> DeepCopyToHeap for InterfaceFactoryGe
 pub(crate) fn interface_globals(builder: &mut GlobalsBuilder) {
     fn interface<'v>(
         #[starlark(kwargs)] kwargs: SmallMap<String, Value<'v>>,
-        heap: &'v Heap,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let mut fields = Vec::new();
 
         // Validate field types
@@ -465,6 +492,21 @@ pub(crate) fn interface_globals(builder: &mut GlobalsBuilder) {
                 || v.downcast_ref::<InterfaceFactory<'v>>().is_some()
                 || v.downcast_ref::<FrozenInterfaceFactory>().is_some()
             {
+                // If a Net instance literal was provided as a template field,
+                // unregister it from the current module so it does not count as
+                // an introduced net of this module. It will be (re)registered
+                // when an interface instance is created.
+                if type_str == "Net" {
+                    if let Some(net_val) = v.downcast_ref::<NetValue<'v>>() {
+                        if let Some(ctx) = eval
+                            .module()
+                            .extra_value()
+                            .and_then(|e| e.downcast_ref::<ContextValue>())
+                        {
+                            ctx.unregister_net(net_val.id());
+                        }
+                    }
+                }
                 fields.push((name.clone(), v.to_value()));
             } else {
                 return Err(anyhow::anyhow!(
@@ -508,6 +550,7 @@ fn instantiate_interface<'v>(
     factory_value: Value<'v>,
     prefix_opt: Option<&str>,
     heap: &'v Heap,
+    eval: &mut Evaluator<'v, '_, '_>,
 ) -> anyhow::Result<Value<'v>> {
     // Handle frozen factories by copying to current heap
     let factory_value = if factory_value
@@ -544,9 +587,19 @@ fn instantiate_interface<'v>(
                 field_name.to_ascii_uppercase()
             };
 
+            let net_id = generate_net_id();
+            let final_name = if let Some(ctx) = eval
+                .module()
+                .extra_value()
+                .and_then(|e| e.downcast_ref::<ContextValue>())
+            {
+                ctx.register_net(net_id, &net_name)?
+            } else {
+                net_name.clone()
+            };
             heap.alloc(NetValue::new(
-                generate_net_id(),
-                net_name,
+                net_id,
+                final_name,
                 SmallMap::new(),
                 Value::new_none(),
             ))
@@ -576,7 +629,11 @@ fn instantiate_interface<'v>(
                     }
                 };
 
-            let net_name = if !template_name.is_empty() {
+            // Treat auto-generated placeholder names like "N123" as "no template name".
+            let is_placeholder = template_name.starts_with('N')
+                && template_name[1..].chars().all(|c| c.is_ascii_digit());
+
+            let net_name = if !template_name.is_empty() && !is_placeholder {
                 prefix_opt
                     .map(|p| format!("{p}_{template_name}"))
                     .unwrap_or(template_name)
@@ -597,12 +654,17 @@ fn instantiate_interface<'v>(
             // Deep copy the symbol
             let copied_symbol = copy_value(template_symbol, heap)?;
 
-            heap.alloc(NetValue::new(
-                generate_net_id(),
-                net_name,
-                new_props,
-                copied_symbol,
-            ))
+            let net_id = generate_net_id();
+            let final_name = if let Some(ctx) = eval
+                .module()
+                .extra_value()
+                .and_then(|e| e.downcast_ref::<ContextValue>())
+            {
+                ctx.register_net(net_id, &net_name)?
+            } else {
+                net_name.clone()
+            };
+            heap.alloc(NetValue::new(net_id, final_name, new_props, copied_symbol))
         } else if spec_value.downcast_ref::<InterfaceFactory<'v>>().is_some()
             || spec_value
                 .downcast_ref::<FrozenInterfaceFactory>()
@@ -611,7 +673,7 @@ fn instantiate_interface<'v>(
             // Interface factory - instantiate it
             let nested_prefix =
                 prefix_opt.map(|p| format!("{}_{}", p, field_name.to_ascii_uppercase()));
-            instantiate_interface(spec_value, nested_prefix.as_deref(), heap)?
+            instantiate_interface(spec_value, nested_prefix.as_deref(), heap, eval)?
         } else if spec_type == "InterfaceValue" {
             // Interface instance - use as template
             let factory_val = if let Some(interface_val) =
@@ -632,7 +694,7 @@ fn instantiate_interface<'v>(
 
             let nested_prefix =
                 prefix_opt.map(|p| format!("{}_{}", p, field_name.to_ascii_uppercase()));
-            instantiate_interface(factory_val, nested_prefix.as_deref(), heap)?
+            instantiate_interface(factory_val, nested_prefix.as_deref(), heap, eval)?
         } else {
             return Err(anyhow::anyhow!(
                 "Invalid field type: {} for field {}",

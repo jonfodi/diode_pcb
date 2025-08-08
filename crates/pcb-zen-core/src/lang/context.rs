@@ -9,6 +9,7 @@ use starlark::{
     values::{starlark_value, Freeze, FreezeResult, Freezer, StarlarkValue, Trace, Value},
 };
 
+use super::net::NetId;
 use super::{
     input::InputMap,
     module::{FrozenModuleValue, ModuleValue},
@@ -153,6 +154,7 @@ impl<'v> ContextValue<'v> {
     }
 
     /// Borrow the underlying `ModuleValue` immutably.
+    #[allow(dead_code)]
     pub(crate) fn module(&self) -> std::cell::Ref<'_, ModuleValue<'v>> {
         self.module.borrow()
     }
@@ -160,5 +162,17 @@ impl<'v> ContextValue<'v> {
     /// Borrow the underlying `ModuleValue` mutably.
     pub(crate) fn module_mut(&self) -> std::cell::RefMut<'_, ModuleValue<'v>> {
         self.module.borrow_mut()
+    }
+
+    /// Register a newly created net with this module. Enforces per-module uniqueness of names.
+    pub(crate) fn register_net(&self, id: NetId, local_name: &str) -> anyhow::Result<String> {
+        self.module
+            .borrow_mut()
+            .register_net(id, local_name.to_string())
+    }
+
+    /// Unregister a previously registered net from the current module.
+    pub(crate) fn unregister_net(&self, id: NetId) {
+        self.module.borrow_mut().unregister_net(id)
     }
 }

@@ -31,6 +31,7 @@ use starlark::values::dict::DictRef;
 
 use super::net::{generate_net_id, NetValue};
 use crate::lang::context::FrozenContextValue;
+use crate::lang::net::NetId;
 use starlark::errors::{EvalMessage, EvalSeverity};
 use thiserror::Error;
 
@@ -110,6 +111,10 @@ pub struct ModuleValueGen<V: ValueLifetimeless> {
     children: Vec<V>,
     properties: SmallMap<String, V>,
     signature: Vec<ParameterMetadataGen<V>>,
+    /// Nets that are introduced (created) by this module. Map of `net id → local name`.
+    introduced_nets: starlark::collections::SmallMap<NetId, String>,
+    /// Local name → net id, to enforce uniqueness of names within a module.
+    net_name_to_id: starlark::collections::SmallMap<String, NetId>,
 }
 
 starlark_complex_value!(pub ModuleValue);
@@ -179,6 +184,8 @@ impl<'v, V: ValueLike<'v>> ModuleValueGen<V> {
             children: Vec::new(),
             properties: SmallMap::new(),
             signature: Vec::new(),
+            introduced_nets: SmallMap::new(),
+            net_name_to_id: SmallMap::new(),
         }
     }
 
@@ -236,6 +243,92 @@ impl<'v, V: ValueLike<'v>> ModuleValueGen<V> {
     /// Get the module's signature.
     pub fn signature(&self) -> &Vec<ParameterMetadataGen<V>> {
         &self.signature
+    }
+
+    /// Record that this module introduced a net with `id` and `local_name`.
+    /// If another net with the same local name already exists in this module,
+    /// generate a unique variant by appending a numeric suffix (e.g. `_2`, `_3`, ...).
+    pub fn register_net(&mut self, id: NetId, local_name: String) -> anyhow::Result<String> {
+        // If this id was already registered, keep the first assignment (idempotent)
+        if self.introduced_nets.get(&id).is_some() {
+            // Return the already-registered name
+            if let Some(name) = self.introduced_nets.get(&id) {
+                return Ok(name.clone());
+            }
+            return Ok(local_name);
+        }
+
+        // If the provided name is empty/whitespace, fall back to a stable placeholder.
+        let base_name = if local_name.trim().is_empty() {
+            format!("N{id}")
+        } else {
+            local_name
+        };
+
+        // Choose a unique name within this module.
+        let unique_name = if let Some(existing_id) = self.net_name_to_id.get(&base_name) {
+            if *existing_id == id {
+                base_name.clone()
+            } else {
+                // Find the next available suffix
+                let mut counter: u32 = 2;
+                let mut candidate = format!("{base_name}_{counter}");
+                while let Some(other_id) = self.net_name_to_id.get(&candidate) {
+                    if *other_id == id {
+                        break;
+                    }
+                    counter += 1;
+                    candidate = format!("{base_name}_{counter}");
+                }
+                candidate
+            }
+        } else {
+            base_name.clone()
+        };
+
+        self.net_name_to_id.insert(unique_name.clone(), id);
+        self.introduced_nets.insert(id, unique_name.clone());
+        Ok(unique_name)
+    }
+
+    /// Return the map of nets introduced by this module.
+    pub fn introduced_nets(&self) -> &starlark::collections::SmallMap<NetId, String> {
+        &self.introduced_nets
+    }
+
+    /// Remove a previously registered net from this module. Intended for
+    /// cases where a `Net()` value was used as a template (e.g., inside
+    /// `interface(...)`) and should not count as an introduced net for the
+    /// enclosing module.
+    pub fn unregister_net(&mut self, id: NetId) {
+        // Find the name associated with this id (if any)
+        let mut name_to_remove: Option<String> = None;
+        for (nid, name) in self.introduced_nets.iter() {
+            if *nid == id {
+                name_to_remove = Some(name.clone());
+                break;
+            }
+        }
+
+        if let Some(name) = name_to_remove {
+            // Rebuild introduced_nets without the given id
+            let mut rebuilt_nets = starlark::collections::SmallMap::new();
+            for (nid, n) in self.introduced_nets.iter() {
+                if *nid != id {
+                    rebuilt_nets.insert(*nid, n.clone());
+                }
+            }
+            self.introduced_nets = rebuilt_nets;
+
+            // Rebuild net_name_to_id without the given name
+            let mut rebuilt_lookup = starlark::collections::SmallMap::new();
+            for (k, v) in self.net_name_to_id.iter() {
+                if k != &name {
+                    rebuilt_lookup.insert(k.clone(), *v);
+                }
+            }
+            self.net_name_to_id = rebuilt_lookup;
+        }
     }
 }
 
@@ -787,12 +880,12 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] help: Option<String>,   // help text describing the parameter
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        // First compute the actual value that will be returned
-        let result_value = {
+        // First compute the actual value that will be returned and the default value to record
+        let (result_value, default_for_metadata) = {
             // 1. Value supplied by the parent module.
             if let Some(provided) = eval.request_input(&name, typ)? {
                 // First try a direct validation.
-                if validate_type(name.as_str(), provided, typ, eval.heap()).is_ok() {
+                let value = if validate_type(name.as_str(), provided, typ, eval.heap()).is_ok() {
                     provided
                 } else if let Some(converted) = try_enum_conversion(provided, typ, eval)? {
                     // If validation failed and `typ` is an enum type, attempt to convert
@@ -801,6 +894,41 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
                     // Fallback: propagate the original validation error.
                     validate_type(name.as_str(), provided, typ, eval.heap())?;
                     unreachable!();
+                };
+                // When a value is provided by parent:
+                // - If an explicit default was provided, use it for metadata
+                // - Otherwise, synthesize the same auto-generated default we would use when inputs
+                //   are missing (but avoid side effects like net registration)
+                if let Some(explicit_default) = default {
+                    // Validate explicit default
+                    validate_type(name.as_str(), explicit_default, typ, eval.heap())?;
+                    (value, Some(explicit_default))
+                } else {
+                    // Synthesize a default for metadata without side effects
+                    let synthesized_default = match typ.get_type() {
+                        // For io() of NetType, create a named net using the placeholder name (do not register)
+                        "NetType" => {
+                            let heap = eval.heap();
+                            heap.alloc(NetValue::new(
+                                generate_net_id(),
+                                name.clone(),
+                                starlark::collections::SmallMap::new(),
+                                Value::new_none(),
+                            ))
+                            .to_value()
+                        }
+                        // For interfaces, instantiate with the placeholder name as instance prefix
+                        "InterfaceFactory" => {
+                            let instance_name = eval.heap().alloc_str(&name).to_value();
+                            eval.eval_function(typ, &[instance_name], &[])
+                                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                        }
+                        _ => {
+                            // Use generic type-based default
+                            default_for_type(eval, typ)?
+                        }
+                    };
+                    (value, Some(synthesized_default))
                 }
             } else {
                 // 2. Determine whether the placeholder is required.
@@ -811,14 +939,54 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
                     if let Some(default_val) = default {
                         // Validate the provided default before using it.
                         validate_type(name.as_str(), default_val, typ, eval.heap())?;
-                        default_val
+                        (default_val, Some(default_val))
                     } else {
                         match typ.get_type() {
-                            "NetType" | "InterfaceFactory" => {
-                                // For io() we always materialise a default Net/Interface
-                                default_for_type(eval, typ)?
+                            // For io() of NetType, create a named net using the placeholder name
+                            "NetType" => {
+                                let heap = eval.heap();
+                                let net_id = generate_net_id();
+                                let net_name = name.clone();
+                                if let Some(ctx) = eval.context_value() {
+                                    let final_name = ctx.register_net(net_id, &net_name)?;
+                                    // Update displayed name to match unique registration
+                                    let generated_default = heap.alloc(NetValue::new(
+                                        net_id,
+                                        final_name,
+                                        starlark::collections::SmallMap::new(),
+                                        Value::new_none(),
+                                    ));
+                                    (
+                                        generated_default.to_value(),
+                                        Some(generated_default.to_value()),
+                                    )
+                                } else {
+                                    let generated_default = heap.alloc(NetValue::new(
+                                        net_id,
+                                        net_name,
+                                        starlark::collections::SmallMap::new(),
+                                        Value::new_none(),
+                                    ));
+                                    (
+                                        generated_default.to_value(),
+                                        Some(generated_default.to_value()),
+                                    )
+                                }
                             }
-                            _ => Value::new_none(),
+                            // For interfaces, instantiate with the placeholder name as instance prefix
+                            "InterfaceFactory" => {
+                                let instance_name = eval.heap().alloc_str(&name).to_value();
+                                let generated_default = eval
+                                    .eval_function(typ, &[instance_name], &[])
+                                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                                (generated_default, Some(generated_default))
+                            }
+                            _ => {
+                                // Keep the returned value None for optional placeholders, but still
+                                // populate metadata default (auto-generated type default)
+                                let gen = default_for_type(eval, typ)?;
+                                (Value::new_none(), Some(gen))
+                            }
                         }
                     }
                 } else {
@@ -842,9 +1010,50 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
                     if let Some(default_val) = default {
                         // Validate the provided default before using it.
                         validate_type(name.as_str(), default_val, typ, eval.heap())?;
-                        default_val
+                        (default_val, Some(default_val))
                     } else {
-                        default_for_type(eval, typ)?
+                        match typ.get_type() {
+                            "NetType" => {
+                                let heap = eval.heap();
+                                let net_id = generate_net_id();
+                                let net_name = name.clone();
+                                if let Some(ctx) = eval.context_value() {
+                                    let final_name = ctx.register_net(net_id, &net_name)?;
+                                    let generated_default = heap.alloc(NetValue::new(
+                                        net_id,
+                                        final_name,
+                                        starlark::collections::SmallMap::new(),
+                                        Value::new_none(),
+                                    ));
+                                    (
+                                        generated_default.to_value(),
+                                        Some(generated_default.to_value()),
+                                    )
+                                } else {
+                                    let generated_default = heap.alloc(NetValue::new(
+                                        net_id,
+                                        net_name,
+                                        starlark::collections::SmallMap::new(),
+                                        Value::new_none(),
+                                    ));
+                                    (
+                                        generated_default.to_value(),
+                                        Some(generated_default.to_value()),
+                                    )
+                                }
+                            }
+                            "InterfaceFactory" => {
+                                let instance_name = eval.heap().alloc_str(&name).to_value();
+                                let generated_default = eval
+                                    .eval_function(typ, &[instance_name], &[])
+                                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                                (generated_default, Some(generated_default))
+                            }
+                            _ => {
+                                let generated_default = default_for_type(eval, typ)?;
+                                (generated_default, Some(generated_default))
+                            }
+                        }
                     }
                 }
             }
@@ -858,7 +1067,7 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
                 name.clone(),
                 typ,
                 optional.unwrap_or(false),
-                default,
+                default_for_metadata,
                 false, // is_config = false for io()
                 help,
                 Some(result_value),
