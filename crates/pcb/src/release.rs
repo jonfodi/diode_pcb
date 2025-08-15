@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use clap::Args;
 
 use log::{debug, info, warn};
-use pcb_sch::generate_bom as generate_bom_entries;
+use pcb_kicad::KiCadCliBuilder;
+use pcb_sch::generate_bom;
 use pcb_ui::{Colorize, Spinner, Style, StyledText};
 use pcb_zen_core::convert::ToSchematic;
 use pcb_zen_core::{EvalOutput, WithDiagnostics};
@@ -47,6 +48,7 @@ const TASKS: &[(&str, TaskFn)] = &[
     ("Copying source files and dependencies", copy_sources),
     ("Copying layout files", copy_layout),
     ("Generating unmatched BOM", generate_unmatched_bom),
+    ("Generating 3D models", generate_3d_models),
     ("Writing release metadata", write_metadata),
     ("Creating release archive", zip_release),
 ];
@@ -378,7 +380,7 @@ fn copy_layout(info: &ReleaseInfo) -> Result<()> {
 /// Generate unmatched BOM JSON file
 fn generate_unmatched_bom(info: &ReleaseInfo) -> Result<()> {
     // Generate BOM entries from the schematic
-    let bom_entries = generate_bom_entries(&info.schematic);
+    let bom_entries = generate_bom(&info.schematic);
 
     // Create bom directory in staging
     let bom_dir = info.staging_dir.join("bom");
@@ -425,5 +427,81 @@ fn add_directory_to_zip(zip: &mut ZipWriter<fs::File>, dir: &Path, base_path: &P
             std::io::copy(&mut fs::File::open(&path)?, zip)?;
         }
     }
+    Ok(())
+}
+
+/// Generate 3D models (STEP, VRML, SVG)
+fn generate_3d_models(info: &ReleaseInfo) -> Result<()> {
+    let models_dir = info.staging_dir.join("3d");
+    fs::create_dir_all(&models_dir)?;
+
+    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    // Generate STEP model - KiCad CLI has platform-specific exit code issues
+    let step_path = models_dir.join("model.step");
+    let step_result = KiCadCliBuilder::new()
+        .command("pcb")
+        .subcommand("export")
+        .subcommand("step")
+        .arg("--subst-models")
+        .arg("--force")
+        .arg("--output")
+        .arg(step_path.to_string_lossy())
+        .arg("--no-dnp")
+        .arg("--no-unspecified")
+        .arg(kicad_pcb_path.to_string_lossy())
+        .run();
+
+    if let Err(e) = step_result {
+        if step_path.exists() {
+            warn!("KiCad CLI reported error but STEP file was created: {e}");
+        } else {
+            return Err(e).context("Failed to generate STEP model");
+        }
+    }
+
+    // Generate VRML model - KiCad CLI has platform-specific exit code issues
+    let wrl_path = models_dir.join("model.wrl");
+    let wrl_result = KiCadCliBuilder::new()
+        .command("pcb")
+        .subcommand("export")
+        .subcommand("vrml")
+        .arg("--output")
+        .arg(wrl_path.to_string_lossy())
+        .arg("--units")
+        .arg("mm")
+        .arg(kicad_pcb_path.to_string_lossy())
+        .run();
+
+    if let Err(e) = wrl_result {
+        if wrl_path.exists() {
+            warn!("KiCad CLI reported error but VRML file was created: {e}");
+        } else {
+            return Err(e).context("Failed to generate VRML model");
+        }
+    }
+
+    // Generate SVG rendering - KiCad CLI has platform-specific exit code issues
+    let svg_path = models_dir.join("model.svg");
+    let svg_result = KiCadCliBuilder::new()
+        .command("pcb")
+        .subcommand("export")
+        .subcommand("svg")
+        .arg("--output")
+        .arg(svg_path.to_string_lossy())
+        .arg("--layers")
+        .arg("F.Cu,B.Cu,F.SilkS,B.SilkS,F.Mask,B.Mask,Edge.Cuts")
+        .arg("--page-size-mode")
+        .arg("2") // Board area only
+        .arg(kicad_pcb_path.to_string_lossy())
+        .run();
+
+    if let Err(e) = svg_result {
+        if svg_path.exists() {
+            warn!("KiCad CLI reported error but SVG file was created: {e}");
+        } else {
+            return Err(e).context("Failed to generate SVG rendering");
+        }
+    }
+
     Ok(())
 }
