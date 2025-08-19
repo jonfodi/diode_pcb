@@ -433,11 +433,89 @@ fn copy_layout(info: &ReleaseInfo) -> Result<()> {
     Ok(())
 }
 
+/// Ensure text variables are defined in .kicad_pro file
+fn update_kicad_pro_text_variables(
+    kicad_pro_path: &Path,
+    version: &str,
+    git_hash: &str,
+) -> Result<()> {
+    // Read the existing .kicad_pro file
+    let content = fs::read_to_string(kicad_pro_path).with_context(|| {
+        format!(
+            "Failed to read .kicad_pro file: {}",
+            kicad_pro_path.display()
+        )
+    })?;
+
+    // Parse as JSON
+    let mut project: serde_json::Value = serde_json::from_str(&content).with_context(|| {
+        format!(
+            "Failed to parse .kicad_pro file as JSON: {}",
+            kicad_pro_path.display()
+        )
+    })?;
+
+    // Check if text variables already exist
+    let text_vars = project.get("text_variables").and_then(|v| v.as_object());
+    let needs_pcb_version = text_vars.is_none_or(|vars| !vars.contains_key("PCB_VERSION"));
+    let needs_pcb_git_hash = text_vars.is_none_or(|vars| !vars.contains_key("PCB_GIT_HASH"));
+
+    // Only modify if we need to add missing variables
+    if needs_pcb_version || needs_pcb_git_hash {
+        // Ensure text_variables object exists
+        if project.get("text_variables").is_none() || !project["text_variables"].is_object() {
+            project["text_variables"] = serde_json::json!({});
+        }
+
+        let text_vars = project["text_variables"].as_object_mut().unwrap();
+
+        // Add missing variables with correct values
+        if needs_pcb_version {
+            text_vars.insert(
+                "PCB_VERSION".to_string(),
+                serde_json::Value::String(version.to_string()),
+            );
+        }
+        if needs_pcb_git_hash {
+            text_vars.insert(
+                "PCB_GIT_HASH".to_string(),
+                serde_json::Value::String(git_hash.to_string()),
+            );
+        }
+
+        // Write back to file with pretty formatting
+        let updated_content = serde_json::to_string_pretty(&project)?;
+        fs::write(kicad_pro_path, updated_content).with_context(|| {
+            format!(
+                "Failed to write updated .kicad_pro file: {}",
+                kicad_pro_path.display()
+            )
+        })?;
+
+        debug!(
+            "Added missing text variables to: {}",
+            kicad_pro_path.display()
+        );
+    } else {
+        debug!(
+            "Text variables already exist in: {}",
+            kicad_pro_path.display()
+        );
+    }
+
+    Ok(())
+}
+
 /// Substitute version and git hash variables in KiCad PCB files
 fn substitute_variables(info: &ReleaseInfo) -> Result<()> {
     debug!("Substituting version variables in KiCad files");
+
+    // First, update the .kicad_pro file to ensure text variables are defined
+    let kicad_pro_path = info.staging_dir.join("layout").join("layout.kicad_pro");
+    update_kicad_pro_text_variables(&kicad_pro_path, &info.version, &info.git_hash)?;
+
+    // Then update the .kicad_pcb file with the actual values
     let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
-    // Create a Python script to substitute variables
     let script = format!(
         r#"
 import sys
@@ -526,7 +604,7 @@ fn generate_gerbers(info: &ReleaseInfo) -> Result<()> {
     let manufacturing_dir = info.staging_dir.join("manufacturing");
     fs::create_dir_all(&manufacturing_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
 
     // Generate gerber files to a temporary directory
     let gerbers_dir = manufacturing_dir.join("gerbers_temp");
@@ -560,7 +638,7 @@ fn generate_drill_files(info: &ReleaseInfo) -> Result<()> {
     let manufacturing_dir = info.staging_dir.join("manufacturing");
     fs::create_dir_all(&manufacturing_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
 
     KiCadCliBuilder::new()
         .command("pcb")
@@ -584,7 +662,7 @@ fn generate_drill_map(info: &ReleaseInfo) -> Result<()> {
     let manufacturing_dir = info.staging_dir.join("manufacturing");
     fs::create_dir_all(&manufacturing_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
 
     KiCadCliBuilder::new()
         .command("pcb")
@@ -609,7 +687,7 @@ fn generate_cpl(info: &ReleaseInfo) -> Result<()> {
     let manufacturing_dir = info.staging_dir.join("manufacturing");
     fs::create_dir_all(&manufacturing_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
 
     KiCadCliBuilder::new()
         .command("pcb")
@@ -637,7 +715,7 @@ fn generate_assembly_drawings(info: &ReleaseInfo) -> Result<()> {
     let manufacturing_dir = info.staging_dir.join("manufacturing");
     fs::create_dir_all(&manufacturing_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
 
     // Generate front assembly drawing
     KiCadCliBuilder::new()
@@ -744,7 +822,7 @@ fn generate_3d_models(info: &ReleaseInfo) -> Result<()> {
     let models_dir = info.staging_dir.join("3d");
     fs::create_dir_all(&models_dir)?;
 
-    let kicad_pcb_path = info.layout_path.join("layout.kicad_pcb");
+    let kicad_pcb_path = info.staging_dir.join("layout").join("layout.kicad_pcb");
     // Generate STEP model - KiCad CLI has platform-specific exit code issues
     let step_path = models_dir.join("model.step");
     let step_result = KiCadCliBuilder::new()
@@ -757,6 +835,9 @@ fn generate_3d_models(info: &ReleaseInfo) -> Result<()> {
         .arg(step_path.to_string_lossy())
         .arg("--no-dnp")
         .arg("--no-unspecified")
+        .arg("--include-pads")
+        .arg("--include-silkscreen")
+        .arg("--include-soldermask")
         .arg(kicad_pcb_path.to_string_lossy())
         .run();
 
