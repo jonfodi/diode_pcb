@@ -567,9 +567,8 @@ pub struct CoreLoadResolver {
     /// Tracks all local files that have been resolved (for vendor/release commands)
     tracked_local_files: Arc<Mutex<HashSet<PathBuf>>>,
     use_vendor_dir: bool,
-
-    // Hierarchical alias resolution cache
-    alias_cache: RwLock<HashMap<PathBuf, Arc<HashMap<String, String>>>>,
+    /// Hierarchical alias resolution cache
+    alias_cache: RwLock<HashMap<PathBuf, HashMap<String, String>>>,
 }
 
 impl CoreLoadResolver {
@@ -677,93 +676,92 @@ impl CoreLoadResolver {
     /// Get hierarchical package aliases for a specific file.
     /// This walks from the appropriate root (workspace or repo) to the file's directory,
     /// merging aliases with deeper directories taking priority.
-    fn get_aliases_for_file(&self, file: &Path) -> Arc<HashMap<String, String>> {
+    fn get_aliases_for_file(&self, file: &Path) -> anyhow::Result<HashMap<String, String>> {
         log::debug!("Resolving aliases for file: {}", file.display());
-        // Canonicalize the directory once
-        let canonical_dir = self
-            .file_provider
-            .canonicalize(file.parent().unwrap_or(Path::new("")))
-            .unwrap_or_else(|_| file.parent().unwrap_or(Path::new("")).to_path_buf());
+        // Canonicalize file
+        let file = self.file_provider.canonicalize(file)?;
+        let dir = file.parent().expect("File must have a parent directory");
 
         // Check cache first (optimistic read)
-        if let Some(cached) = self.alias_cache.read().unwrap().get(&canonical_dir) {
-            log::debug!(
-                "  Using cached aliases for directory: {}",
-                canonical_dir.display()
-            );
-            return cached.clone();
+        if let Some(cached) = self.alias_cache.read().unwrap().get(dir) {
+            log::debug!("  Using cached aliases for directory: {}", dir.display());
+            return Ok(cached.clone());
         }
 
-        // Determine alias root (workspace or remote repo root)
-        let alias_root = if canonical_dir.starts_with(&self.workspace_root) {
+        // Determine alias root (workspace or workspace/vendor or remote repo root)
+        let spec = self.path_to_spec.lock().unwrap().get(&file).cloned();
+        let vendor_dir = self.workspace_root.join("vendor");
+        let alias_root = if file.starts_with(&vendor_dir) {
+            log::debug!("  Using vendor root: {}", vendor_dir.display());
+            vendor_dir
+        } else if file.starts_with(&self.workspace_root) {
             log::debug!("  Using workspace root: {}", self.workspace_root.display());
             self.workspace_root.clone()
         } else {
             // For remote files, find repo root using existing LoadSpec mapping
-            let canonical_file = self
-                .file_provider
-                .canonicalize(file)
-                .unwrap_or_else(|_| file.to_path_buf());
-            if let Some(spec) = self.path_to_spec.lock().unwrap().get(&canonical_file) {
-                match spec {
-                    LoadSpec::Github {
-                        path: spec_path, ..
-                    }
-                    | LoadSpec::Gitlab {
-                        path: spec_path, ..
-                    }
-                    | LoadSpec::Package {
-                        path: spec_path, ..
-                    } => {
-                        // Walk up from file by the number of components in spec_path
-                        let mut root = canonical_file;
-                        for _ in 0..spec_path.components().count() {
-                            root = root.parent().unwrap_or(Path::new("")).to_path_buf();
-                        }
-                        log::debug!("  Using remote repo root: {}", root.display());
-                        root
-                    }
-                    _ => {
-                        log::debug!("  File has non-remote LoadSpec, using defaults");
-                        return Arc::new(LoadSpec::default_package_aliases());
-                    }
+            if let Some(spec) = &spec {
+                // Walk up from file by the number of components in spec_path
+                let mut root = file.clone();
+                for _ in 0..spec.path().components().count() {
+                    root = root.parent().unwrap_or(Path::new("")).to_path_buf();
                 }
+                log::debug!("  Using remote repo root: {}", root.display());
+                root
             } else {
                 log::debug!("  File not in path_to_spec mapping, using defaults");
-                return Arc::new(LoadSpec::default_package_aliases());
+                return Ok(LoadSpec::default_package_aliases());
             }
         };
 
-        // Build aliases by walking ancestors from root to target
-        let mut aliases = LoadSpec::default_package_aliases();
-        let ancestors: Vec<_> = canonical_dir
+        let pcb_toml_files = file
             .ancestors()
             .take_while(|p| p.starts_with(&alias_root))
-            .collect();
-        for ancestor in ancestors.into_iter().rev() {
-            if let Ok(content) = self.file_provider.read_file(&ancestor.join("pcb.toml")) {
-                let toml_aliases = parse_package_aliases_from_toml(&content);
-                log::debug!(
-                    "  Merging {} aliases from: {}",
-                    toml_aliases.len(),
-                    ancestor.display()
-                );
-                aliases.extend(toml_aliases);
-            }
+            .map(|p| p.join("pcb.toml"))
+            .filter(|p| self.file_provider.exists(p))
+            .collect::<Vec<_>>();
+
+        // Add all discovered pcb.toml files to path_to_spec mapping
+        if let Some(spec) = &spec {
+            let pcb_toml_specs = pcb_toml_files
+                .iter()
+                .cloned()
+                .map(|p| {
+                    // get pcb.toml path relative to alias root
+                    let rel_pcb_toml_path = p.strip_prefix(&alias_root).unwrap().to_path_buf();
+                    (p, spec.with_path(rel_pcb_toml_path))
+                })
+                .collect::<HashMap<PathBuf, LoadSpec>>();
+            self.path_to_spec.lock().unwrap().extend(pcb_toml_specs);
         }
 
-        log::debug!(
-            "  Final aliases for {}: {:?}",
-            canonical_dir.display(),
-            aliases.keys().collect::<Vec<_>>()
-        );
+        // Iterate in reverse to prioritize the deepest (closest to leaf) pcb.toml files
+        let aliases = pcb_toml_files
+            .into_iter()
+            .map(|p| {
+                let content = self.file_provider.read_file(&p)?;
+                let toml_aliases = parse_package_aliases_from_toml(&content);
+                Ok::<_, anyhow::Error>(toml_aliases)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            .fold(LoadSpec::default_package_aliases(), |mut acc, aliases| {
+                acc.extend(aliases);
+                acc
+            });
 
+        log::debug!("Inserting aliases for dir: {}", dir.display());
         self.alias_cache
             .write()
             .unwrap()
-            .entry(canonical_dir)
-            .or_insert_with(|| Arc::new(aliases))
-            .clone()
+            .insert(dir.to_path_buf(), aliases.clone());
+
+        log::debug!(
+            "Final aliases for {}: {:?}",
+            dir.display(),
+            aliases.keys().collect::<Vec<_>>()
+        );
+        Ok(aliases)
     }
 
     /// Get all files that have been resolved through this resolver
@@ -798,7 +796,7 @@ impl LoadResolver for CoreLoadResolver {
         current_file: &Path,
     ) -> Result<PathBuf, anyhow::Error> {
         // Check if the current file is a cached remote file
-        let current_file_spec = self.path_to_spec.lock().unwrap().get(current_file).cloned();
+        let current_file_spec = self.get_load_spec_for_path(current_file);
 
         // If we're resolving from a remote file, we need to handle relative and workspace paths specially
         if let Some(remote_spec) = current_file_spec {
@@ -905,7 +903,7 @@ impl LoadResolver for CoreLoadResolver {
         // First, resolve any package aliases
         let (resolved_spec, is_from_alias) = if let LoadSpec::Package { .. } = spec {
             // Always use hierarchical alias resolution - works for workspace OR remote repo
-            let aliases = self.get_aliases_for_file(current_file);
+            let aliases = self.get_aliases_for_file(current_file)?;
             log::debug!(
                 "Resolving package spec: {} from file: {}",
                 spec.to_load_string(),
