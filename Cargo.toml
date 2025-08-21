@@ -27,6 +27,7 @@ pcb-kicad = { path = "crates/pcb-kicad" }
 pcb-sexpr = { path = "crates/pcb-sexpr", features = ["serde"] }
 pcb-starlark-lsp = { path = "crates/pcb-starlark-lsp" }
 pcb-buildifier = { path = "crates/pcb-buildifier" }
+pcb-test-utils = { path = "crates/pcb-test-utils" }
 
 anyhow = "1.0"
 ariadne = { version = "0.5", features = ["auto-color"] }
@@ -35,7 +36,9 @@ clap = { version = "4", features = ["derive", "wrap_help"] }
 colored = "2"
 derive_more = { version = "1.0.0", features = ["full"] }
 dirs = "6"
+dir_diff = "0.3.3"
 dupe = "0.9.1"
+duct = "1.1.0"
 env_logger = "0.11"
 indicatif = "0.17.8"
 inquire = "0.7"
@@ -95,8 +98,10 @@ openssl = { version = "0.10", features = ["vendored"] }
 wasm-bindgen-futures = "0.4"
 rust_decimal = { version = "1", features = ["serde", "serde-with-str"] }
 comfy-table = "7.1"
+url = "2.5"
 dir-diff = "0.3"
 ignore = "0.4"
+sha2 = "0.10"
 
 # The profile that 'dist' will build with
 [profile.dist]

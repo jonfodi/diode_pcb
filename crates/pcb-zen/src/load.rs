@@ -24,12 +24,7 @@ fn materialise_remote(spec: &LoadSpec, workspace_root: &Path) -> anyhow::Result<
             anyhow::bail!("materialise_remote only handles remote specs, not local paths")
         }
         LoadSpec::Package { package, tag, path } => {
-            let cache_root = cache_dir()?.join("packages").join(package).join(tag);
-
-            // Ensure package tarball is present/unpacked.
-            if !cache_root.exists() {
-                download_and_unpack_package(package, tag, &cache_root)?;
-            }
+            let cache_root = ensure_remote_cached(spec)?;
 
             let local_path = if path.as_os_str().is_empty() {
                 cache_root.clone()
@@ -57,12 +52,7 @@ fn materialise_remote(spec: &LoadSpec, workspace_root: &Path) -> anyhow::Result<
             rev,
             path,
         } => {
-            let cache_root = cache_dir()?.join("github").join(user).join(repo).join(rev);
-
-            // Ensure the repo has been fetched & unpacked.
-            if !cache_root.exists() {
-                download_and_unpack_github_repo(user, repo, rev, &cache_root)?;
-            }
+            let cache_root = ensure_remote_cached(spec)?;
 
             let local_path = cache_root.join(path);
             if !local_path.exists() {
@@ -88,12 +78,7 @@ fn materialise_remote(spec: &LoadSpec, workspace_root: &Path) -> anyhow::Result<
             rev,
             path,
         } => {
-            let cache_root = cache_dir()?.join("gitlab").join(project_path).join(rev);
-
-            // Ensure the repo has been fetched & unpacked.
-            if !cache_root.exists() {
-                download_and_unpack_gitlab_repo(project_path, rev, &cache_root)?;
-            }
+            let cache_root = ensure_remote_cached(spec)?;
 
             let local_path = cache_root.join(path);
             if !local_path.exists() {
@@ -112,6 +97,72 @@ fn materialise_remote(spec: &LoadSpec, workspace_root: &Path) -> anyhow::Result<
             let _ = expose_alias_symlink(workspace_root, &folder_name, path, &local_path);
             Ok(local_path)
         }
+    }
+}
+
+/// Ensure a cache directory exists atomically, downloading if necessary.
+fn ensure_cached_atomically(
+    cache_root: &Path,
+    download_fn: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    if cache_root.exists() {
+        return Ok(());
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = cache_root.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Create temp directory in same parent as final cache directory
+    let temp_dir = tempfile::tempdir_in(cache_root.parent().unwrap())?;
+
+    // Download to temp directory
+    download_fn(temp_dir.path())?;
+
+    // Atomically move temp directory to final location
+    match std::fs::rename(temp_dir.path(), cache_root) {
+        Ok(()) => Ok(()),
+        Err(_) if cache_root.exists() => {
+            // Another thread won the race - that's fine
+            // TempDir will clean itself up on drop
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Ensure the remote is cached and return the root directory of the checked-out revision.
+/// Returns the directory containing the checked-out repository or unpacked package.
+/// Uses atomic directory creation to prevent race conditions when multiple tests run in parallel.
+pub fn ensure_remote_cached(spec: &LoadSpec) -> anyhow::Result<PathBuf> {
+    match spec {
+        LoadSpec::Package { package, tag, .. } => {
+            let cache_root = cache_dir()?.join("packages").join(package).join(tag);
+            ensure_cached_atomically(&cache_root, |temp_dir| {
+                download_and_unpack_package(package, tag, temp_dir)
+            })?;
+            Ok(cache_root)
+        }
+        LoadSpec::Github {
+            user, repo, rev, ..
+        } => {
+            let cache_root = cache_dir()?.join("github").join(user).join(repo).join(rev);
+            ensure_cached_atomically(&cache_root, |temp_dir| {
+                download_and_unpack_github_repo(user, repo, rev, temp_dir)
+            })?;
+            Ok(cache_root)
+        }
+        LoadSpec::Gitlab {
+            project_path, rev, ..
+        } => {
+            let cache_root = cache_dir()?.join("gitlab").join(project_path).join(rev);
+            ensure_cached_atomically(&cache_root, |temp_dir| {
+                download_and_unpack_gitlab_repo(project_path, rev, temp_dir)
+            })?;
+            Ok(cache_root)
+        }
+        _ => anyhow::bail!("ensure_remote_cached only handles remote specs"),
     }
 }
 
@@ -146,7 +197,7 @@ fn download_and_unpack_package(_package: &str, _tag: &str, _dest_dir: &Path) -> 
     anyhow::bail!("Package file download not yet implemented")
 }
 
-fn download_and_unpack_github_repo(
+pub fn download_and_unpack_github_repo(
     user: &str,
     repo: &str,
     rev: &str,
@@ -329,7 +380,7 @@ fn download_and_unpack_github_repo(
     Ok(())
 }
 
-fn download_and_unpack_gitlab_repo(
+pub fn download_and_unpack_gitlab_repo(
     project_path: &str,
     rev: &str,
     dest_dir: &Path,
