@@ -150,7 +150,7 @@ impl PcbToml {
 impl BoardInfo {
     /// Get the absolute path to the board's .zen file
     pub fn absolute_zen_path(&self) -> PathBuf {
-        self.directory.join(&self.zen_path)
+        self.directory.join(&self.zen_path).canonicalize().unwrap()
     }
 }
 
@@ -212,7 +212,7 @@ pub fn discover_boards(
     let mut errors = Vec::new();
     let mut visited_directories = std::collections::HashSet::new();
 
-    // Helper function to insert boards and handle duplicates
+    // Helper function to insert boards and handle duplicates (case-insensitive)
     fn insert_board(
         boards_by_name: &mut std::collections::HashMap<String, BoardInfo>,
         errors: &mut Vec<DiscoveryError>,
@@ -220,7 +220,12 @@ pub fn discover_boards(
         culprit_path: PathBuf,
         legacy: bool,
     ) {
-        if boards_by_name.contains_key(&board.name) {
+        // Detect conflicts ignoring case, but preserve original casing for storage/display
+        let has_conflict = boards_by_name
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case(&board.name));
+
+        if has_conflict {
             errors.push(DiscoveryError {
                 path: culprit_path,
                 error: format!(
@@ -395,6 +400,18 @@ pub fn get_workspace_info(
         boards: discovery.boards,
         errors: discovery.errors,
     })
+}
+
+impl WorkspaceInfo {
+    /// Given an absolute .zen path, return the board name
+    /// (or None if the file is not one of the workspace boards).
+    pub fn board_name_for_zen(&self, zen_path: &Path) -> Option<String> {
+        let canon = zen_path.canonicalize().ok()?;
+        self.boards
+            .iter()
+            .find(|b| b.absolute_zen_path() == canon)
+            .map(|b| b.name.clone())
+    }
 }
 
 #[cfg(test)]
