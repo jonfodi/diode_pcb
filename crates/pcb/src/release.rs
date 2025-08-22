@@ -3,7 +3,7 @@ use clap::{Args, ValueEnum};
 
 use log::{debug, info, warn};
 use pcb_kicad::{KiCadCliBuilder, PythonScriptBuilder};
-use pcb_sch::generate_bom;
+use pcb_sch::generate_bom_entries;
 use pcb_ui::{Colorize, Spinner, Style, StyledText};
 use pcb_zen_core::convert::ToSchematic;
 use pcb_zen_core::{EvalOutput, WithDiagnostics};
@@ -72,7 +72,7 @@ const TASKS: &[(&str, TaskFn)] = &[
     ("Copying source files and dependencies", copy_sources),
     ("Copying layout files", copy_layout),
     ("Substituting version variables", substitute_variables),
-    ("Generating unmatched BOM", generate_unmatched_bom),
+    ("Generating design BOM", generate_design_bom),
     ("Generating gerber files", generate_gerbers),
     ("Generating pick-and-place file", generate_cpl),
     ("Generating assembly drawings", generate_assembly_drawings),
@@ -544,17 +544,17 @@ print("Text variables updated successfully")
     Ok(())
 }
 
-/// Generate unmatched BOM JSON file
-fn generate_unmatched_bom(info: &ReleaseInfo) -> Result<()> {
+/// Generate design BOM JSON file
+fn generate_design_bom(info: &ReleaseInfo) -> Result<()> {
     // Generate BOM entries from the schematic
-    let bom_entries = generate_bom(&info.schematic);
+    let bom_entries = generate_bom_entries(&mut info.schematic.clone());
 
     // Create bom directory in staging
     let bom_dir = info.staging_dir.join("bom");
     fs::create_dir_all(&bom_dir)?;
 
-    // Write unmatched BOM as JSON
-    let bom_file = bom_dir.join("unmatched.json");
+    // Write design BOM as JSON
+    let bom_file = bom_dir.join("design_bom.json");
     let file = fs::File::create(&bom_file)?;
     serde_json::to_writer_pretty(file, &bom_entries)?;
 

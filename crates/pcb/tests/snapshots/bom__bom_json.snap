@@ -1,6 +1,6 @@
 ---
-source: crates/pcb/tests/simple.rs
-expression: "sb.snapshot_run(\"pcb\", [\"bom\", \"boards/TestBoard.zen\", \"-f\", \"json\"])"
+source: crates/pcb/tests/bom.rs
+expression: output
 ---
 Command: pcb bom boards/TestBoard.zen -f json
 Exit Code: 0
