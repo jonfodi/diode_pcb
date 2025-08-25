@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use super::Codemod;
 use pcb_zen_core::FileProvider;
-use pcb_zen_core::{file_extensions, CoreLoadResolver, DefaultFileProvider, LoadResolver};
+use pcb_zen_core::{
+    file_extensions, CoreLoadResolver, DefaultFileProvider, LoadResolver, LoadSpec, ResolveContext,
+};
 use starlark::syntax::{AstModule, Dialect};
 use starlark_syntax::syntax::ast::{ArgumentP, AstArgumentP, ExprP, StmtP};
 use starlark_syntax::syntax::module::AstModuleFields;
@@ -16,7 +18,7 @@ pub struct RemoveDirectoryLoads;
 impl Codemod for RemoveDirectoryLoads {
     fn apply(&self, current_file: &Path, content: &str) -> Result<Option<String>> {
         let file_provider = Arc::new(DefaultFileProvider);
-        let remote_fetcher = Arc::new(DefaultRemoteFetcher);
+        let remote_fetcher = Arc::new(DefaultRemoteFetcher::default());
         let resolver =
             CoreLoadResolver::for_file(file_provider.clone(), remote_fetcher, current_file, true);
 
@@ -48,11 +50,13 @@ impl Codemod for RemoveDirectoryLoads {
             }
 
             // Resolve
-            let resolved_dir =
-                match resolver.resolve_path(file_provider.as_ref(), module_path, current_file) {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
+            let resolved_dir: PathBuf = match LoadSpec::parse(module_path).and_then(|spec| {
+                let mut context = ResolveContext::new(file_provider.as_ref(), &spec, current_file);
+                resolver.resolve(&mut context).ok()
+            }) {
+                Some(p) => p,
+                None => continue,
+            };
             if !file_provider.is_directory(&resolved_dir) {
                 continue;
             }

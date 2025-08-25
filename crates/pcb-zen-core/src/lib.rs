@@ -1,31 +1,30 @@
 use std::{
     collections::{HashMap, HashSet},
-    error::Error as StdError,
-    fmt::Display,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
 
 use anyhow::Context;
-use serde::ser::SerializeStruct;
-use starlark::{
-    codemap::ResolvedSpan,
-    errors::{EvalMessage, EvalSeverity},
-    eval::CallStack,
-};
 
-pub mod bundle;
 pub mod config;
 pub mod convert;
+pub mod diagnostics;
 mod file_provider;
 pub mod lang;
 pub mod load_spec;
+pub mod passes;
+pub mod warnings;
 
 // Re-export commonly used types
 pub use config::{BoardConfig, ModuleConfig, PcbToml, WorkspaceConfig};
+pub use diagnostics::{
+    Diagnostic, DiagnosticError, Diagnostics, DiagnosticsPass, LoadError, WithDiagnostics,
+};
+pub use lang::error::{SuppressedDiagnostics, UnstableRefError};
 pub use lang::eval::{EvalContext, EvalOutput};
 pub use lang::input::{InputMap, InputValue};
 pub use load_spec::LoadSpec;
+pub use passes::{AggregatePass, FilterHiddenPass, LspFilterPass, PromoteDeniedPass, SortPass};
 
 // Re-export file provider types
 pub use file_provider::InMemoryFileProvider;
@@ -34,243 +33,6 @@ pub use file_provider::InMemoryFileProvider;
 pub use lang::component::FrozenComponentValue;
 pub use lang::module::FrozenModuleValue;
 pub use lang::net::{FrozenNetValue, NetId};
-
-/// A wrapper error type that carries a Diagnostic through the starlark error chain.
-/// This allows us to preserve the full diagnostic information when errors cross
-/// module boundaries during load() operations.
-#[derive(Debug, Clone)]
-pub struct DiagnosticError(pub Diagnostic);
-
-impl Display for DiagnosticError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Just display the inner diagnostic
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for DiagnosticError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-/// Wrapper error that has DiagnosticError as its source, allowing it to be
-/// discovered through the error chain.
-#[derive(Debug)]
-pub struct LoadError {
-    pub message: String,
-    pub diagnostic: DiagnosticError,
-}
-
-impl Display for LoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for LoadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.diagnostic)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Diagnostic {
-    pub path: String,
-    pub span: Option<ResolvedSpan>,
-    pub severity: EvalSeverity,
-    pub body: String,
-    pub call_stack: Option<CallStack>,
-
-    /// Optional child diagnostic representing a nested error that occurred in a
-    /// downstream (e.g. loaded) module.  When present, this allows callers to
-    /// reconstruct a chain of diagnostics across module/evaluation boundaries
-    /// without needing to rely on parsing rendered strings.
-    pub child: Option<Box<Diagnostic>>,
-}
-
-impl serde::Serialize for Diagnostic {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("Diagnostic", 6)?;
-        state.serialize_field("path", &self.path)?;
-        state.serialize_field("span", &self.span.map(|span| span.to_string()))?;
-        state.serialize_field("severity", &self.severity)?;
-        state.serialize_field("body", &self.body)?;
-        state.serialize_field(
-            "call_stack",
-            &self.call_stack.as_ref().map(|stack| stack.to_string()),
-        )?;
-        state.serialize_field("child", &self.child)?;
-        state.end()
-    }
-}
-
-impl Diagnostic {
-    pub fn from_eval_message(msg: EvalMessage) -> Self {
-        Self {
-            path: msg.path,
-            span: msg.span,
-            severity: msg.severity,
-            body: msg.description,
-            call_stack: None,
-            child: None,
-        }
-    }
-
-    pub fn from_error(err: starlark::Error) -> Self {
-        // Check the source chain of the error kind
-        if let Some(source) = err.kind().source() {
-            let mut current: Option<&(dyn StdError + 'static)> = Some(source);
-            while let Some(src) = current {
-                // Check if this source is our DiagnosticError
-                if let Some(diag_err) = src.downcast_ref::<DiagnosticError>() {
-                    return diag_err.0.clone();
-                }
-                current = src.source();
-            }
-        }
-
-        // No hidden diagnostic found - create one from the starlark error
-        Self {
-            path: err
-                .span()
-                .map(|span| span.file.filename().to_string())
-                .unwrap_or_default(),
-            span: err.span().map(|span| span.resolve_span()),
-            severity: EvalSeverity::Error,
-            body: err.kind().to_string(),
-            call_stack: Some(err.call_stack().clone()),
-            child: None,
-        }
-    }
-
-    pub fn with_child(self, child: Diagnostic) -> Self {
-        Self {
-            child: Some(Box::new(child)),
-            ..self
-        }
-    }
-
-    /// Return `true` if the diagnostic severity is `Error`.
-    pub fn is_error(&self) -> bool {
-        matches!(self.severity, EvalSeverity::Error)
-    }
-}
-
-impl Display for Diagnostic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Format: "Error: path:line:col-line:col message"
-        write!(f, "{}: ", self.severity)?;
-
-        if !self.path.is_empty() {
-            write!(f, "{}", self.path)?;
-            if let Some(span) = &self.span {
-                write!(f, ":{span}")?;
-            }
-            write!(f, " ")?;
-        }
-
-        write!(f, "{}", self.body)?;
-
-        let mut current = &self.child;
-        while let Some(diag) = current {
-            write!(f, "\n{}: ", diag.severity)?;
-
-            if !diag.path.is_empty() {
-                write!(f, "{}", diag.path)?;
-                if let Some(span) = &diag.span {
-                    write!(f, ":{span}")?;
-                }
-                write!(f, " ")?;
-            }
-
-            write!(f, "{}", diag.body)?;
-            current = &diag.child;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for Diagnostic {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // We don't have a source error, as Diagnostic is our root error type
-        None
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct WithDiagnostics<T> {
-    pub diagnostics: Vec<Diagnostic>,
-    pub output: Option<T>,
-}
-
-impl<T: Display> Display for WithDiagnostics<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(output) = &self.output {
-            write!(f, "{output}")?;
-        }
-        for diagnostic in &self.diagnostics {
-            write!(f, "{diagnostic}")?;
-        }
-        Ok(())
-    }
-}
-
-impl<T> WithDiagnostics<T> {
-    /// Convenience constructor for a *successful* evaluation.
-    pub fn success(output: T, diagnostics: Vec<Diagnostic>) -> Self {
-        Self {
-            diagnostics,
-            output: Some(output),
-        }
-    }
-
-    /// Convenience constructor for a *failed* evaluation.
-    pub fn failure(diagnostics: Vec<Diagnostic>) -> Self {
-        Self {
-            diagnostics,
-            output: None,
-        }
-    }
-
-    /// Return `true` if any diagnostic in the list represents an error.
-    pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.is_error())
-    }
-
-    /// Return `true` if evaluation produced an output **and** did not emit
-    /// any error-level diagnostics.
-    pub fn is_success(&self) -> bool {
-        self.output.is_some() && !self.has_errors()
-    }
-
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> WithDiagnostics<U> {
-        if let Some(output) = self.output {
-            WithDiagnostics::success(f(output), self.diagnostics)
-        } else {
-            WithDiagnostics::failure(self.diagnostics)
-        }
-    }
-
-    pub fn flat_map<U>(self, f: impl FnOnce(T) -> WithDiagnostics<U>) -> WithDiagnostics<U> {
-        match self.output {
-            Some(output) => {
-                let mut result = f(output);
-                let mut diagnostics = self.diagnostics;
-                diagnostics.append(&mut result.diagnostics);
-                if result.output.is_some() {
-                    WithDiagnostics::success(result.output.unwrap(), diagnostics)
-                } else {
-                    WithDiagnostics::failure(diagnostics)
-                }
-            }
-            None => WithDiagnostics::failure(self.diagnostics),
-        }
-    }
-}
 
 /// Abstraction for file system access to make the core WASM-compatible
 pub trait FileProvider: Send + Sync {
@@ -387,17 +149,29 @@ impl FileProvider for DefaultFileProvider {
     }
 }
 
+/// Information about a package alias including its target and source
+#[derive(Debug, Clone)]
+pub struct AliasInfo {
+    /// The target of the alias (e.g., "@github/mycompany/components:main")
+    pub target: String,
+    /// The canonical path to the pcb.toml file that defined this alias.
+    /// None for built-in default aliases.
+    pub source_path: Option<PathBuf>,
+}
+
 /// Abstraction for fetching remote resources (packages, GitHub repos, etc.)
 /// This allows pcb-zen-core to handle all resolution logic while delegating
 /// the actual network/filesystem operations to the implementor.
 pub trait RemoteFetcher: Send + Sync {
     /// Fetch a remote resource and return the local path where it was materialized.
-    /// This could involve downloading, caching, unpacking, etc.
     fn fetch_remote(
         &self,
         spec: &LoadSpec,
         workspace_root: &Path,
     ) -> Result<PathBuf, anyhow::Error>;
+
+    /// Lookup metadata for a previously fetched remote ref, if cached.
+    fn remote_ref_meta(&self, remote_ref: &RemoteRef) -> Option<RemoteRefMeta>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -415,39 +189,188 @@ impl RemoteFetcher for NoopRemoteFetcher {
             spec
         ))
     }
+
+    fn remote_ref_meta(&self, _remote_ref: &RemoteRef) -> Option<RemoteRefMeta> {
+        None
+    }
 }
 
 /// Abstraction for resolving load() paths to file contents
-pub trait LoadResolver: Send + Sync {
-    /// Resolve a LoadSpec to an absolute file path
-    ///
-    /// The `spec` is a parsed load specification.
-    /// The `current_file` is the file that contains the load() statement.
-    ///
-    /// Returns the resolved absolute path that should be loaded.
-    fn resolve_spec(
-        &self,
-        file_provider: &dyn FileProvider,
-        spec: &LoadSpec,
-        current_file: &Path,
-    ) -> Result<PathBuf, anyhow::Error>;
+/// Kind of a resolved Git reference after fetching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefKind {
+    Tag,
+    Commit,
+    Unstable,
+}
 
-    /// Resolve a load path to an absolute file path
-    ///
-    /// The `load_path` is the string passed to load() in Starlark code.
-    /// The `current_file` is the file that contains the load() statement.
-    ///
-    /// Returns the resolved absolute path that should be loaded.
-    fn resolve_path(
-        &self,
-        file_provider: &dyn FileProvider,
-        load_path: &str,
-        current_file: &Path,
-    ) -> Result<PathBuf, anyhow::Error> {
-        let spec = LoadSpec::parse(load_path)
-            .ok_or_else(|| anyhow::anyhow!("Invalid load spec: {}", load_path))?;
-        self.resolve_spec(file_provider, &spec, current_file)
+/// Remote reference identifier with structured information
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RemoteRef {
+    GitHub {
+        user: String,
+        repo: String,
+        rev: String,
+    },
+    GitLab {
+        project_path: String,
+        rev: String,
+    },
+}
+
+impl RemoteRef {
+    /// Get the canonical repository URL for this remote reference
+    pub fn repo_url(&self) -> Option<String> {
+        match self {
+            RemoteRef::GitHub { user, repo, .. } => {
+                Some(format!("https://github.com/{user}/{repo}"))
+            }
+            RemoteRef::GitLab { project_path, .. } => {
+                Some(format!("https://gitlab.com/{project_path}"))
+            }
+        }
     }
+
+    pub fn rev(&self) -> &str {
+        match self {
+            RemoteRef::GitHub { rev, .. } | RemoteRef::GitLab { rev, .. } => rev,
+        }
+    }
+}
+
+/// Metadata about a resolved remote reference
+#[derive(Debug, Clone)]
+pub struct RemoteRefMeta {
+    /// Full 40-character SHA-1 commit id
+    pub commit_sha1: String,
+    /// Full SHA-256 commit id when repository uses SHA-256 object format
+    pub commit_sha256: Option<String>,
+    /// Classification of the ref
+    pub kind: RefKind,
+}
+
+impl RemoteRefMeta {
+    pub fn stable(&self) -> bool {
+        matches!(self.kind, RefKind::Tag | RefKind::Commit)
+    }
+}
+
+/// Context struct for load resolution operations
+/// Contains input parameters and computed state for path resolution
+pub struct ResolveContext<'a> {
+    // Input parameters
+    pub file_provider: &'a dyn FileProvider,
+    pub current_file: &'a Path,
+
+    // Resolution history - specs get pushed as they're resolved further
+    // Index 0 = original spec, later indices = progressively resolved specs
+    pub spec_history: Vec<LoadSpec>,
+
+    // Alias information for the current file (cached on construction)
+    pub alias_info: HashMap<String, AliasInfo>,
+
+    // Computed state (lazily initialized)
+    effective_workspace_root: Option<PathBuf>,
+}
+
+impl<'a> ResolveContext<'a> {
+    /// Create a new ResolveContext with the required input parameters
+    pub fn new(
+        file_provider: &'a dyn FileProvider,
+        spec: &LoadSpec,
+        current_file: &'a Path,
+    ) -> Self {
+        Self {
+            file_provider,
+            current_file,
+            spec_history: vec![spec.clone()],
+            alias_info: HashMap::new(), // Will be populated during resolution
+            effective_workspace_root: None,
+        }
+    }
+
+    /// Get the current (most recently resolved) spec
+    pub fn current_spec(&self) -> &LoadSpec {
+        self.spec_history
+            .last()
+            .expect("spec_history should never be empty")
+    }
+
+    /// Push a newly resolved spec onto the resolution history with cycle detection
+    pub fn push_spec(&mut self, spec: LoadSpec) -> anyhow::Result<()> {
+        // Check for cycles - if we've already seen this spec, it's a cycle
+        if self.spec_history.contains(&spec) {
+            return Err(anyhow::anyhow!(
+                "Circular dependency detected: spec {} creates a cycle in resolution history",
+                spec
+            ));
+        }
+        self.spec_history.push(spec);
+        Ok(())
+    }
+
+    /// Get or compute the effective workspace root for the current file
+    pub fn effective_workspace_root(
+        &mut self,
+        resolver: &CoreLoadResolver,
+    ) -> anyhow::Result<&PathBuf> {
+        if self.effective_workspace_root.is_none() {
+            self.effective_workspace_root =
+                Some(resolver.get_effective_workspace_root(self.current_file)?);
+        }
+        Ok(self.effective_workspace_root.as_ref().unwrap())
+    }
+
+    /// Get alias information if this resolution went through alias resolution
+    pub fn get_alias_info(&self) -> Option<&crate::AliasInfo> {
+        // Check if we started with a package spec (alias resolution)
+        if let Some(LoadSpec::Package { package, .. }) = self.spec_history.first() {
+            return self.alias_info.get(package);
+        }
+        None
+    }
+}
+
+pub trait LoadResolver: Send + Sync {
+    /// Convenience method to resolve a load path string directly
+    /// This encapsulates the common pattern of parsing a path and creating a ResolveContext
+    fn resolve_path(&self, path: &str, current_file: &Path) -> Result<PathBuf, anyhow::Error> {
+        let spec = LoadSpec::parse(path)
+            .ok_or_else(|| anyhow::anyhow!("Invalid load path spec: {}", path))?;
+        let mut context = ResolveContext::new(self.file_provider(), &spec, current_file);
+        self.resolve(&mut context)
+    }
+
+    /// Convenience method to resolve a LoadSpec directly
+    fn resolve_spec(&self, spec: &LoadSpec, current_file: &Path) -> Result<PathBuf, anyhow::Error> {
+        let mut context = ResolveContext::new(self.file_provider(), spec, current_file);
+        self.resolve(&mut context)
+    }
+
+    fn resolve_context<'a>(
+        &'a self,
+        path: &str,
+        current_file: &'a Path,
+    ) -> Result<ResolveContext<'a>, anyhow::Error> {
+        let spec = LoadSpec::parse(path)
+            .ok_or_else(|| anyhow::anyhow!("Invalid load path spec: {}", path))?;
+        let context = ResolveContext::new(self.file_provider(), &spec, current_file);
+        Ok(context)
+    }
+
+    fn file_provider(&self) -> &dyn FileProvider;
+
+    /// Resolve a LoadSpec to an absolute file path using the provided context
+    ///
+    /// The context contains the load specification, current file, and other state needed for resolution.
+    /// Returns the resolved absolute path that should be loaded.
+    fn resolve(&self, context: &mut ResolveContext) -> Result<PathBuf, anyhow::Error>;
+
+    /// Return the remote ref for a resolved path, if available.
+    fn remote_ref(&self, _path: &Path) -> Option<RemoteRef>;
+
+    /// Return stored metadata for a previously fetched remote ref, if available.
+    fn remote_ref_meta(&self, _remote_ref: &RemoteRef) -> Option<RemoteRefMeta>;
 }
 
 /// File extension constants and utilities
@@ -508,14 +431,14 @@ pub struct CoreLoadResolver {
     file_provider: Arc<dyn FileProvider>,
     remote_fetcher: Arc<dyn RemoteFetcher>,
     workspace_root: PathBuf,
+    use_vendor_dir: bool,
     /// Maps resolved paths to their original LoadSpecs
     /// This allows us to resolve relative paths from remote files correctly
     path_to_spec: Arc<Mutex<HashMap<PathBuf, LoadSpec>>>,
     /// Tracks all local files that have been resolved (for vendor/release commands)
     tracked_local_files: Arc<Mutex<HashSet<PathBuf>>>,
-    use_vendor_dir: bool,
     /// Hierarchical alias resolution cache
-    alias_cache: RwLock<HashMap<PathBuf, HashMap<String, String>>>,
+    alias_cache: RwLock<HashMap<PathBuf, HashMap<String, AliasInfo>>>,
     /// Workspace root cache by directory path
     workspace_root_cache: RwLock<HashMap<PathBuf, PathBuf>>,
 }
@@ -664,10 +587,10 @@ impl CoreLoadResolver {
         }
     }
 
-    /// Get hierarchical package aliases for a specific file.
+    /// Get hierarchical package aliases with source info for a specific file.
     /// This walks from the appropriate root (workspace or repo) to the file's directory,
     /// merging aliases with deeper directories taking priority.
-    fn get_aliases_for_file(&self, file: &Path) -> anyhow::Result<HashMap<String, String>> {
+    fn get_alias_info_for_file(&self, file: &Path) -> anyhow::Result<HashMap<String, AliasInfo>> {
         log::debug!("Resolving aliases for file: {}", file.display());
         // Canonicalize file
         let file = self.file_provider.canonicalize(file)?;
@@ -724,7 +647,21 @@ impl CoreLoadResolver {
             .map(|p| {
                 let content = self.file_provider.read_file(&p)?;
                 let toml_aliases = config::PcbToml::parse(&content)?.packages;
-                Ok::<_, anyhow::Error>(toml_aliases)
+                // Convert to AliasInfo with source path
+                let canonical_path = self.file_provider.canonicalize(&p)?;
+                let alias_info_map = toml_aliases
+                    .into_iter()
+                    .map(|(key, target)| {
+                        (
+                            key,
+                            AliasInfo {
+                                target,
+                                source_path: Some(canonical_path.clone()),
+                            },
+                        )
+                    })
+                    .collect::<HashMap<String, AliasInfo>>();
+                Ok::<_, anyhow::Error>(alias_info_map)
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -776,260 +713,172 @@ impl CoreLoadResolver {
     pub fn track_file(&self, path: PathBuf) {
         self.tracked_local_files.lock().unwrap().insert(path);
     }
-}
 
-impl LoadResolver for CoreLoadResolver {
-    fn resolve_spec(
-        &self,
-        file_provider: &dyn FileProvider,
-        spec: &LoadSpec,
-        current_file: &Path,
-    ) -> Result<PathBuf, anyhow::Error> {
-        // Compute the effective workspace root for this file at the top
-        let effective_workspace_root = self.get_effective_workspace_root(current_file)?;
-        // Check if the current file is a cached remote file
-        let current_file_spec = self.get_load_spec_for_path(current_file);
+    /// Handle remote relative path resolution
+    /// Pushes resolved specs directly to the context's spec history if applicable
+    fn handle_remote_relative_paths(&self, context: &mut ResolveContext) -> anyhow::Result<()> {
+        let current_file_spec = self.get_load_spec_for_path(context.current_file);
 
-        // If we're resolving from a remote file, we need to handle relative and workspace paths specially
         if let Some(remote_spec) = current_file_spec {
-            match spec {
+            // Only proceed if the current file is actually from a remote spec
+            if !remote_spec.is_remote() {
+                return Ok(());
+            }
+            match context.current_spec() {
                 LoadSpec::Path { path } if !path.is_absolute() => {
                     // Relative path from a remote file - resolve it relative to the remote spec
-                    match &remote_spec {
-                        LoadSpec::Github {
-                            user,
-                            repo,
-                            rev,
-                            path: remote_path,
-                        } => {
-                            // Get the directory of the remote file
-                            let remote_dir = remote_path.parent().unwrap_or(Path::new(""));
-                            // Join with the relative path and normalize
-                            let new_path = normalize_path(&remote_dir.join(path));
-                            // Create a new GitHub spec with the resolved path
-                            let new_spec = LoadSpec::Github {
-                                user: user.clone(),
-                                repo: repo.clone(),
-                                rev: rev.clone(),
-                                path: new_path,
-                            };
-                            // Recursively resolve this new spec
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        LoadSpec::Gitlab {
-                            project_path,
-                            rev,
-                            path: remote_path,
-                        } => {
-                            let remote_dir = remote_path.parent().unwrap_or(Path::new(""));
-                            let new_path = normalize_path(&remote_dir.join(path));
-                            let new_spec = LoadSpec::Gitlab {
-                                project_path: project_path.clone(),
-                                rev: rev.clone(),
-                                path: new_path,
-                            };
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        LoadSpec::Package {
-                            package,
-                            tag,
-                            path: remote_path,
-                        } => {
-                            let remote_dir = remote_path.parent().unwrap_or(Path::new(""));
-                            let new_path = normalize_path(&remote_dir.join(path));
-                            let new_spec = LoadSpec::Package {
-                                package: package.clone(),
-                                tag: tag.clone(),
-                                path: new_path,
-                            };
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        _ => {
-                            // For other types, fall through to normal handling
-                        }
-                    }
+                    let remote_path = remote_spec.path();
+                    let remote_dir = remote_path.parent().unwrap_or(Path::new(""));
+                    let new_path = normalize_path(&remote_dir.join(path));
+                    let new_spec = remote_spec.with_path(new_path);
+                    context.push_spec(new_spec)?;
                 }
                 LoadSpec::WorkspacePath { path } => {
                     // Workspace path from a remote file - resolve it relative to the remote root
-                    match &remote_spec {
-                        LoadSpec::Github {
-                            user, repo, rev, ..
-                        } => {
-                            let new_spec = LoadSpec::Github {
-                                user: user.clone(),
-                                repo: repo.clone(),
-                                rev: rev.clone(),
-                                path: path.clone(),
-                            };
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        LoadSpec::Gitlab {
-                            project_path, rev, ..
-                        } => {
-                            let new_spec = LoadSpec::Gitlab {
-                                project_path: project_path.clone(),
-                                rev: rev.clone(),
-                                path: path.clone(),
-                            };
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        LoadSpec::Package { package, tag, .. } => {
-                            let new_spec = LoadSpec::Package {
-                                package: package.clone(),
-                                tag: tag.clone(),
-                                path: path.clone(),
-                            };
-                            return self.resolve_spec(file_provider, &new_spec, current_file);
-                        }
-                        _ => {
-                            // For other types, fall through to normal handling
-                        }
-                    }
+                    let new_spec = remote_spec.with_path(path.clone());
+                    context.push_spec(new_spec)?;
                 }
                 _ => {
                     // Other spec types proceed normally
                 }
             }
         }
+        Ok(())
+    }
 
-        // First, resolve any package aliases
-        let (resolved_spec, is_from_alias) = if let LoadSpec::Package { .. } = spec {
-            // Always use hierarchical alias resolution - works for workspace OR remote repo
-            let aliases = self.get_aliases_for_file(current_file)?;
-            log::debug!(
-                "Resolving package spec: {} from file: {}",
-                spec.to_load_string(),
-                current_file.display()
-            );
-            let resolved = spec.resolve(Some(&aliases))?;
-            if resolved != *spec {
-                log::debug!(
-                    "  Package alias resolved: {} -> {}",
-                    spec.to_load_string(),
-                    resolved.to_load_string()
-                );
+    /// Attempt to resolve package aliases and push resolved spec to history
+    /// Returns true if alias resolution happened and a new spec was pushed
+    pub fn resolve_alias_spec(&self, context: &mut ResolveContext) -> anyhow::Result<PathBuf> {
+        // Get the full alias info and populate context
+        context.alias_info = self.get_alias_info_for_file(context.current_file)?;
+
+        // Clone the current spec to avoid borrowing issues
+        let current_spec = context.current_spec().clone();
+
+        // Use the AliasInfo map directly
+        let mut resolved = current_spec.resolve(Some(&context.alias_info))?;
+
+        // Only push if the resolution actually changed the spec
+        if resolved != current_spec {
+            // Make paths absolute before pushing to history
+            if let LoadSpec::Path { path } = &resolved {
+                if !path.is_absolute() {
+                    let absolute_path = self.workspace_root.join(path);
+                    resolved = LoadSpec::Path {
+                        path: absolute_path,
+                    };
+                }
             }
-            // Check if the resolution changed the spec type (indicating it was an alias)
-            let from_alias = !matches!(&resolved, LoadSpec::Package { .. });
-            (resolved, from_alias)
+            context.push_spec(resolved)?;
+            self.resolve(context)
         } else {
-            (spec.clone(), false)
-        };
+            // Failed to resolve alias
+            anyhow::bail!("Failed to resolve alias for spec: {}", current_spec)
+        }
+    }
 
-        match &resolved_spec {
-            // Remote specs need to be fetched
-            LoadSpec::Package { .. } | LoadSpec::Github { .. } | LoadSpec::Gitlab { .. } => {
-                // First try vendor directory if available
-                if self.use_vendor_dir {
-                    if let Ok(vendor_path) = self.try_resolve_from_vendor(&resolved_spec) {
-                        return Ok(vendor_path);
-                    }
-                }
-
-                let resolved_path = self
-                    .remote_fetcher
-                    .fetch_remote(&resolved_spec, &self.workspace_root)?;
-
-                let canonical_resolved_path = file_provider.canonicalize(&resolved_path)?;
-
-                // Store the mapping from resolved path to original spec
-                self.path_to_spec
-                    .lock()
-                    .unwrap()
-                    .insert(canonical_resolved_path.clone(), resolved_spec.clone());
-
-                Ok(canonical_resolved_path)
-            }
-
-            // Workspace-relative paths (starts with //)
-            LoadSpec::WorkspacePath { path } => {
-                let canonical_root = file_provider.canonicalize(&effective_workspace_root)?;
-                let resolved_path = canonical_root.join(path);
-
-                // Canonicalize the resolved path to handle .. and symlinks
-                let canonical_path = file_provider.canonicalize(&resolved_path)?;
-
-                if file_provider.exists(&canonical_path) {
-                    // Track local file
-                    self.tracked_local_files
-                        .lock()
-                        .unwrap()
-                        .insert(canonical_path.clone());
-                    Ok(canonical_path)
-                } else {
-                    Err(anyhow::anyhow!(
-                        "File not found: {}",
-                        canonical_path.display()
-                    ))
-                }
-            }
-
-            // Regular paths (relative or absolute)
-            LoadSpec::Path { path } => {
-                if path.is_absolute() {
-                    // Absolute paths are used as-is
-                    let canonical_path = file_provider.canonicalize(path)?;
-
-                    if file_provider.exists(&canonical_path) {
-                        // Track local file
-                        self.tracked_local_files
-                            .lock()
-                            .unwrap()
-                            .insert(canonical_path.clone());
-                        Ok(canonical_path)
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "File not found: {}",
-                            canonical_path.display()
-                        ))
-                    }
-                } else if is_from_alias {
-                    // If this path came from an alias resolution, treat it as workspace-relative
-                    let canonical_root = file_provider.canonicalize(&self.workspace_root)?;
-                    let resolved_path = canonical_root.join(path);
-
-                    // Canonicalize the resolved path to handle .. and symlinks
-                    let canonical_path = file_provider.canonicalize(&resolved_path)?;
-
-                    if file_provider.exists(&canonical_path) {
-                        // Track local file
-                        self.tracked_local_files
-                            .lock()
-                            .unwrap()
-                            .insert(canonical_path.clone());
-                        Ok(canonical_path)
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "File not found: {}",
-                            canonical_path.display()
-                        ))
-                    }
-                } else {
-                    // Regular relative paths are resolved from the current file's directory
-                    let current_dir = current_file
-                        .parent()
-                        .ok_or_else(|| anyhow::anyhow!("Current file has no parent directory"))?;
-
-                    let resolved_path = current_dir.join(path);
-
-                    // Canonicalize the resolved path to handle .. and symlinks
-                    let canonical_path = file_provider.canonicalize(&resolved_path)?;
-
-                    if file_provider.exists(&canonical_path) {
-                        // Track local file
-                        self.tracked_local_files
-                            .lock()
-                            .unwrap()
-                            .insert(canonical_path.clone());
-                        Ok(canonical_path)
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "File not found: {}",
-                            canonical_path.display()
-                        ))
-                    }
-                }
+    /// Resolve remote specs (Package/Github/Gitlab)
+    fn resolve_remote_spec(&self, context: &mut ResolveContext) -> anyhow::Result<PathBuf> {
+        let resolved_spec = context.current_spec().clone();
+        // First try vendor directory if available
+        if self.use_vendor_dir {
+            if let Ok(vendor_path) = self.try_resolve_from_vendor(&resolved_spec) {
+                return Ok(vendor_path);
             }
         }
+
+        let resolved_path = self
+            .remote_fetcher
+            .fetch_remote(&resolved_spec, &self.workspace_root)?;
+
+        let canonical_resolved_path = context.file_provider.canonicalize(&resolved_path)?;
+
+        // Store the mapping from resolved path to original spec
+        self.path_to_spec
+            .lock()
+            .unwrap()
+            .insert(canonical_resolved_path.clone(), resolved_spec.clone());
+
+        Ok(canonical_resolved_path)
+    }
+
+    /// Resolve local specs (Path/WorkspacePath)
+    fn resolve_local_spec(&self, context: &mut ResolveContext) -> anyhow::Result<PathBuf> {
+        let resolved_spec = context.current_spec().clone();
+        let resolved_path = match &resolved_spec {
+            LoadSpec::WorkspacePath { path } => {
+                let effective_workspace_root = context.effective_workspace_root(self)?.clone();
+                let canonical_root = context
+                    .file_provider
+                    .canonicalize(&effective_workspace_root)?;
+                canonical_root.join(path)
+            }
+            LoadSpec::Path { path } => {
+                if path.is_absolute() {
+                    path.clone()
+                } else {
+                    // Regular relative paths are resolved from current file's directory
+                    let current_dir = context
+                        .current_file
+                        .parent()
+                        .ok_or_else(|| anyhow::anyhow!("Current file has no parent directory"))?;
+                    current_dir.join(path)
+                }
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected spec type in resolve_local_spec"
+                ))
+            }
+        };
+
+        // Canonicalize and verify the path exists
+        let canonical_path = context.file_provider.canonicalize(&resolved_path)?;
+
+        if context.file_provider.exists(&canonical_path) {
+            // Track local file
+            self.tracked_local_files
+                .lock()
+                .unwrap()
+                .insert(canonical_path.clone());
+            Ok(canonical_path)
+        } else {
+            Err(anyhow::anyhow!(
+                "File not found: {}",
+                canonical_path.display()
+            ))
+        }
+    }
+}
+
+impl LoadResolver for CoreLoadResolver {
+    fn file_provider(&self) -> &dyn FileProvider {
+        &*self.file_provider
+    }
+
+    fn resolve(&self, context: &mut ResolveContext) -> Result<PathBuf, anyhow::Error> {
+        // Handle remote relative paths first (pushes to spec history if needed)
+        self.handle_remote_relative_paths(context)?;
+
+        // Route to appropriate resolver based on current spec type
+        match context.current_spec() {
+            // Alias specs need to be resolved
+            LoadSpec::Package { .. } => self.resolve_alias_spec(context),
+            // Remote specs need to be fetched
+            LoadSpec::Github { .. } | LoadSpec::Gitlab { .. } => self.resolve_remote_spec(context),
+            // Local specs (paths and workspace paths)
+            LoadSpec::WorkspacePath { .. } | LoadSpec::Path { .. } => {
+                self.resolve_local_spec(context)
+            }
+        }
+    }
+
+    fn remote_ref(&self, path: &Path) -> Option<RemoteRef> {
+        self.get_load_spec_for_path(path)
+            .and_then(|s| s.remote_ref())
+    }
+
+    fn remote_ref_meta(&self, remote_ref: &RemoteRef) -> Option<RemoteRefMeta> {
+        self.remote_fetcher.remote_ref_meta(remote_ref)
     }
 }
