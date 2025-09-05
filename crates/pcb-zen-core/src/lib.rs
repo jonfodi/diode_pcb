@@ -8,6 +8,7 @@ pub mod config;
 pub mod convert;
 pub mod diagnostics;
 mod file_provider;
+pub mod graph;
 pub mod lang;
 pub mod load_spec;
 pub mod passes;
@@ -50,7 +51,7 @@ pub use diagnostics::{
     Diagnostic, DiagnosticError, Diagnostics, DiagnosticsPass, LoadError, WithDiagnostics,
 };
 pub use lang::error::{SuppressedDiagnostics, UnstableRefError};
-pub use lang::eval::{EvalContext, EvalOutput};
+pub use lang::eval::{EvalContext, EvalMode, EvalOutput};
 pub use lang::input::{InputMap, InputValue};
 pub use load_spec::LoadSpec;
 pub use passes::{AggregatePass, FilterHiddenPass, LspFilterPass, PromoteDeniedPass, SortPass};

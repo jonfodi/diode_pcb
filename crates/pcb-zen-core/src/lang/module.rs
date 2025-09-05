@@ -22,17 +22,36 @@ use starlark::{
     },
 };
 
+use crate::graph::starlark::ModuleGraphValueGen;
 use crate::lang::context::ContextValue;
 use crate::lang::eval::EvalContext;
 use crate::lang::evaluator_ext::EvaluatorExt;
 use crate::lang::input::InputMap;
 use crate::{Diagnostic, InputValue};
-use starlark::values::dict::DictRef;
+use starlark::values::dict::{AllocDict, DictRef};
+
+/// Helper macro for frozen module downcasting to reduce repetition
+#[macro_export]
+macro_rules! downcast_frozen_module {
+    ($module:expr) => {
+        $module
+            .to_value()
+            .downcast_ref::<FrozenModuleValue>()
+            .ok_or_else(|| {
+                starlark::Error::new_other(anyhow::anyhow!(
+                    "Module methods only work on frozen modules"
+                ))
+            })?
+    };
+}
 
 use super::net::{generate_net_id, NetValue};
 use crate::lang::context::FrozenContextValue;
 use crate::lang::net::NetId;
+use crate::{FrozenComponentValue, FrozenNetValue};
 use starlark::errors::{EvalMessage, EvalSeverity};
+use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -120,8 +139,187 @@ pub struct ModuleValueGen<V: ValueLifetimeless> {
 starlark_complex_value!(pub ModuleValue);
 
 #[starlark_value(type = "Module")]
-impl<'v, V: ValueLike<'v>> StarlarkValue<'v> for ModuleValueGen<V> where Self: ProvidesStaticType<'v>
-{}
+impl<'v, V: ValueLike<'v>> StarlarkValue<'v> for ModuleValueGen<V>
+where
+    Self: ProvidesStaticType<'v>,
+{
+    fn get_attr(&self, attr: &str, heap: &'v Heap) -> Option<Value<'v>> {
+        let module_value = heap.alloc_complex(self.clone()).to_value();
+
+        match attr {
+            "nets" => {
+                let callable = NetsCallableGen {
+                    module: module_value,
+                };
+                Some(heap.alloc_complex(callable))
+            }
+            "components" => {
+                let callable = ComponentsCallableGen {
+                    module: module_value,
+                };
+                Some(heap.alloc_complex(callable))
+            }
+            "graph" => {
+                let callable = GraphCallableGen {
+                    module: module_value,
+                };
+                Some(heap.alloc_complex(callable))
+            }
+            _ => None,
+        }
+    }
+
+    fn has_attr(&self, attr: &str, _heap: &'v Heap) -> bool {
+        matches!(attr, "nets" | "components" | "graph")
+    }
+
+    fn dir_attr(&self) -> Vec<String> {
+        vec![
+            "nets".to_string(),
+            "components".to_string(),
+            "graph".to_string(),
+        ]
+    }
+
+    fn at(&self, index: Value<'v>, _heap: &'v Heap) -> starlark::Result<Value<'v>> {
+        let key = index.unpack_str().ok_or_else(|| {
+            starlark::Error::new_other(anyhow::anyhow!(
+                "Module index must be a string, got {}",
+                index.get_type()
+            ))
+        })?;
+
+        self.find_at_path(key)
+    }
+
+    fn is_in(&self, other: Value<'v>) -> starlark::Result<bool> {
+        let key = other.unpack_str().ok_or_else(|| {
+            starlark::Error::new_other(anyhow::anyhow!(
+                "Module membership test requires a string, got {}",
+                other.get_type()
+            ))
+        })?;
+
+        Ok(self.contains_at_path(key))
+    }
+}
+
+impl<'v, V: ValueLike<'v>> ModuleValueGen<V> {
+    /// Find a child at the given path (supports nested paths like "foo.bar")
+    fn find_at_path(&self, path: &str) -> starlark::Result<Value<'v>> {
+        // Handle nested paths (e.g., "foo.bar")
+        if let Some(dot_pos) = path.find('.') {
+            let (first, rest) = path.split_at(dot_pos);
+            let rest = &rest[1..]; // Skip the dot
+
+            // Find the first part in children
+            for child in self.children().iter() {
+                if let Some(component) = child.downcast_ref::<FrozenComponentValue>() {
+                    if component.name() == first {
+                        return Err(starlark::Error::new_other(anyhow::anyhow!(
+                            "Cannot access '{}' on component '{}' - components don't have child elements",
+                            rest, first
+                        )));
+                    }
+                } else if let Some(submodule) = child.downcast_ref::<FrozenModuleValue>() {
+                    if submodule.name() == first {
+                        return submodule.find_at_path(rest);
+                    }
+                }
+            }
+
+            return Err(starlark::Error::new_other(anyhow::anyhow!(
+                "Module '{}' has no child named '{}'",
+                self.name(),
+                first
+            )));
+        }
+
+        // Single key - look for exact match
+        for child in self.children().iter() {
+            if let Some(component) = child.downcast_ref::<FrozenComponentValue>() {
+                if component.name() == path {
+                    return Ok(child.to_value());
+                }
+            } else if let Some(submodule) = child.downcast_ref::<FrozenModuleValue>() {
+                if submodule.name() == path {
+                    return Ok(child.to_value());
+                }
+            }
+        }
+
+        Err(starlark::Error::new_other(anyhow::anyhow!(
+            "Module '{}' has no child named '{}'",
+            self.name(),
+            path
+        )))
+    }
+
+    /// Check if a path exists in the given module (supports nested paths like "foo.bar")
+    fn contains_at_path(&self, path: &str) -> bool {
+        // Handle nested paths (e.g., "foo.bar")
+        if let Some(dot_pos) = path.find('.') {
+            let (first, rest) = path.split_at(dot_pos);
+            let rest = &rest[1..]; // Skip the dot
+
+            // Find the first part in children
+            for child in self.children().iter() {
+                if let Some(component) = child.downcast_ref::<FrozenComponentValue>() {
+                    if component.name() == first {
+                        return false; // Can't go deeper into components
+                    }
+                } else if let Some(submodule) = child.downcast_ref::<FrozenModuleValue>() {
+                    if submodule.name() == first {
+                        return submodule.contains_at_path(rest);
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Single key - look for exact match
+        for child in self.children().iter() {
+            if let Some(component) = child.downcast_ref::<FrozenComponentValue>() {
+                if component.name() == path {
+                    return true;
+                }
+            } else if let Some(submodule) = child.downcast_ref::<FrozenModuleValue>() {
+                if submodule.name() == path {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Recursively collect components from this module and its submodules
+    pub fn collect_components(&self, path_prefix: &str) -> SmallMap<String, Value<'v>> {
+        let mut components = SmallMap::new();
+
+        for child in self.children().iter() {
+            if let Some(component) = child.downcast_ref::<FrozenComponentValue>() {
+                let path = if path_prefix.is_empty() {
+                    component.name().to_string()
+                } else {
+                    format!("{}.{}", path_prefix, component.name())
+                };
+                components.insert(path, child.to_value());
+            } else if let Some(submodule) = child.downcast_ref::<FrozenModuleValue>() {
+                let subpath = if path_prefix.is_empty() {
+                    submodule.name().to_string()
+                } else {
+                    format!("{}.{}", path_prefix, submodule.name())
+                };
+                // Recurse into submodule
+                let subcomponents = submodule.collect_components(&subpath);
+                components.extend(subcomponents);
+            }
+        }
+
+        components
+    }
+}
 
 impl<'v, V: ValueLike<'v>> std::fmt::Display for ModuleValueGen<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -294,6 +492,36 @@ impl<'v, V: ValueLike<'v>> ModuleValueGen<V> {
     /// Return the map of nets introduced by this module.
     pub fn introduced_nets(&self) -> &starlark::collections::SmallMap<NetId, String> {
         &self.introduced_nets
+    }
+
+    /// Extract all net names from a value recursively.
+    /// This handles Net types directly and recursively extracts nets from Interface types.
+    pub fn extract_nets_from_value(value: starlark::values::Value<'_>) -> HashSet<String> {
+        use crate::lang::interface::{FrozenInterfaceValue, InterfaceValue};
+        use crate::lang::net::{FrozenNetValue, NetValue};
+
+        let mut nets = HashSet::new();
+
+        // Check if it's a Net
+        if let Some(net) = value.downcast_ref::<NetValue>() {
+            nets.insert(net.name().to_string());
+        } else if let Some(net) = value.downcast_ref::<FrozenNetValue>() {
+            nets.insert(net.name().to_string());
+        }
+        // Check if it's an Interface
+        else if let Some(iface) = value.downcast_ref::<InterfaceValue>() {
+            // Recursively extract nets from all interface fields
+            for (_field_name, field_value) in iface.fields().iter() {
+                nets.extend(Self::extract_nets_from_value(*field_value));
+            }
+        } else if let Some(iface) = value.downcast_ref::<FrozenInterfaceValue>() {
+            // Recursively extract nets from all interface fields
+            for (_field_name, field_value) in iface.fields().iter() {
+                nets.extend(Self::extract_nets_from_value(field_value.to_value()));
+            }
+        }
+
+        nets
     }
 
     /// Remove a previously registered net from this module. Intended for
@@ -839,26 +1067,262 @@ fn validate_or_convert<'v>(
     unreachable!();
 }
 
-#[starlark_module]
-pub fn module_globals(builder: &mut GlobalsBuilder) {
-    fn Module<'v>(
-        #[starlark(require = pos)] path: String,
+/// Callable wrapper for nets() method on modules
+#[derive(Clone, Debug, Coerce, Trace, ProvidesStaticType, NoSerialize, Allocative, Freeze)]
+#[repr(C)]
+pub struct NetsCallableGen<V: ValueLifetimeless> {
+    module: V,
+}
+
+starlark_complex_value!(pub NetsCallable);
+
+impl<V: ValueLifetimeless> std::fmt::Display for NetsCallableGen<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Module.nets")
+    }
+}
+
+#[starlark_value(type = "function")]
+impl<'v, V: ValueLike<'v>> StarlarkValue<'v> for NetsCallableGen<V>
+where
+    Self: ProvidesStaticType<'v>,
+{
+    fn invoke(
+        &self,
+        _me: Value<'v>,
+        args: &Arguments<'v, '_>,
         eval: &mut Evaluator<'v, '_, '_>,
-    ) -> anyhow::Result<Value<'v>> {
+    ) -> starlark::Result<Value<'v>> {
+        // Nets method takes no arguments
+        if args.len()? != 0 {
+            return Err(starlark::Error::new_other(anyhow::anyhow!(
+                "nets() takes no arguments"
+            )));
+        }
+
+        let heap = eval.heap();
+
+        // Get the module and collect its components
+        let module_ref = downcast_frozen_module!(self.module);
+
+        let components = module_ref.collect_components("");
+
+        // Build reverse mapping: net_name -> list of (comp_path, pin_name) tuples
+        let mut net_to_ports: HashMap<String, Vec<Value<'v>>> = HashMap::new();
+
+        for (comp_path, comp_val) in components.iter() {
+            let comp_val = comp_val.to_value();
+            if let Some(component) = comp_val.downcast_ref::<FrozenComponentValue>() {
+                for (pin_name, net_val) in component.connections().iter() {
+                    if let Some(net) = net_val.downcast_ref::<FrozenNetValue>() {
+                        let port_tuple =
+                            heap.alloc((heap.alloc_str(comp_path), heap.alloc_str(pin_name)));
+                        net_to_ports
+                            .entry(net.name().to_string())
+                            .or_default()
+                            .push(port_tuple.to_value());
+                    }
+                }
+            }
+        }
+
+        // Convert to starlark dict format
+        let nets_dict: Vec<_> = net_to_ports
+            .into_iter()
+            .map(|(net_name, port_tuples)| {
+                (
+                    heap.alloc_str(&net_name).to_value(),
+                    heap.alloc(port_tuples),
+                )
+            })
+            .collect();
+
+        Ok(heap.alloc(AllocDict(nets_dict)))
+    }
+}
+
+/// Callable wrapper for components() method on modules
+#[derive(Clone, Debug, Coerce, Trace, ProvidesStaticType, NoSerialize, Allocative, Freeze)]
+#[repr(C)]
+pub struct ComponentsCallableGen<V: ValueLifetimeless> {
+    module: V,
+}
+
+/// Callable wrapper for graph() method on modules
+#[derive(Clone, Debug, Coerce, Trace, ProvidesStaticType, NoSerialize, Allocative, Freeze)]
+#[repr(C)]
+pub struct GraphCallableGen<V: ValueLifetimeless> {
+    module: V,
+}
+
+starlark_complex_value!(pub ComponentsCallable);
+starlark_complex_value!(pub GraphCallable);
+
+impl<V: ValueLifetimeless> std::fmt::Display for ComponentsCallableGen<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Module.components")
+    }
+}
+
+#[starlark_value(type = "function")]
+impl<'v, V: ValueLike<'v>> StarlarkValue<'v> for ComponentsCallableGen<V>
+where
+    Self: ProvidesStaticType<'v>,
+{
+    fn invoke(
+        &self,
+        _me: Value<'v>,
+        args: &Arguments<'v, '_>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> starlark::Result<Value<'v>> {
+        // Components method takes no arguments
+        if args.len()? != 0 {
+            return Err(starlark::Error::new_other(anyhow::anyhow!(
+                "components() takes no arguments"
+            )));
+        }
+
+        let heap = eval.heap();
+
+        // Get the module and collect its components
+        let module_ref = downcast_frozen_module!(self.module);
+
+        let components = module_ref.collect_components("");
+
+        Ok(heap.alloc(AllocDict(
+            components
+                .iter()
+                .map(|(path, comp_val)| (heap.alloc_str(path).to_value(), comp_val.to_value()))
+                .collect::<Vec<_>>(),
+        )))
+    }
+}
+
+impl<V: ValueLifetimeless> std::fmt::Display for GraphCallableGen<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Module.graph")
+    }
+}
+
+#[starlark_value(type = "function")]
+impl<'v, V: ValueLike<'v>> StarlarkValue<'v> for GraphCallableGen<V>
+where
+    Self: ProvidesStaticType<'v>,
+{
+    fn invoke(
+        &self,
+        _me: Value<'v>,
+        args: &Arguments<'v, '_>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> starlark::Result<Value<'v>> {
+        // Graph method takes no arguments
+        if args.len()? != 0 {
+            return Err(starlark::Error::new_other(anyhow::anyhow!(
+                "graph() takes no arguments"
+            )));
+        }
+
+        let heap = eval.heap();
+
+        // Get the module and collect its components
+        let module_ref = downcast_frozen_module!(self.module);
+
+        let components = module_ref.collect_components("");
+
+        // Collect all component connections to build nets using proper types
+        use crate::graph::{ComponentPath, PortPath};
+        let mut net_to_ports: HashMap<String, Vec<PortPath>> = HashMap::new();
+        let mut component_pins: HashMap<ComponentPath, Vec<String>> = HashMap::new();
+
+        for (comp_path, comp_val) in components.iter() {
+            let comp_val = comp_val.to_value();
+            if let Some(component) = comp_val.downcast_ref::<crate::FrozenComponentValue>() {
+                let mut pins = Vec::new();
+                for (pin_name, net_val) in component.connections().iter() {
+                    if let Some(net) = net_val.downcast_ref::<crate::FrozenNetValue>() {
+                        let port_path = PortPath::new(comp_path.clone(), pin_name.clone());
+                        pins.push(pin_name.clone());
+
+                        net_to_ports
+                            .entry(net.name().to_string())
+                            .or_default()
+                            .push(port_path);
+                    }
+                }
+                if !pins.is_empty() {
+                    component_pins.insert(comp_path.clone().into(), pins);
+                }
+            }
+        }
+
+        // Collect public nets from module signature (io() parameters)
+        let mut public_nets = HashSet::new();
+        for param in module_ref.signature().iter() {
+            if !param.is_config {
+                // This is an io() parameter - extract nets from it
+                if let Some(actual_value) = &param.actual_value {
+                    public_nets.extend(ModuleValueGen::<V>::extract_nets_from_value(
+                        actual_value.to_value(),
+                    ));
+                }
+            }
+        }
+
+        // Build the CircuitGraph directly from the collected data
+        let graph = crate::graph::CircuitGraph::new(net_to_ports, component_pins, public_nets)
+            .map_err(|e| {
+                starlark::Error::new_other(anyhow::anyhow!("Failed to create circuit graph: {}", e))
+            })?;
+
+        // Create and return ModuleGraph object
+        let module_graph = ModuleGraphValueGen {
+            module: self.module.to_value(),
+            graph: Arc::new(graph),
+        };
+
+        Ok(heap.alloc_complex(module_graph))
+    }
+}
+
+/// ModuleType is used for type annotations (like ComponentType)
+#[derive(Debug, Trace, ProvidesStaticType, NoSerialize, Allocative, Freeze)]
+#[repr(C)]
+pub struct ModuleType;
+
+starlark_simple_value!(ModuleType);
+
+#[starlark_value(type = "Module")]
+impl<'v> StarlarkValue<'v> for ModuleType
+where
+    Self: ProvidesStaticType<'v>,
+{
+    fn invoke(
+        &self,
+        _me: Value<'v>,
+        args: &Arguments<'v, '_>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> starlark::Result<Value<'v>> {
+        // Extract path parameter - Module only takes one positional argument
+        let path = args.positional1(eval.heap())?;
+
+        let path = path
+            .unpack_str()
+            .ok_or_else(|| {
+                starlark::Error::new_other(anyhow::anyhow!("Module path must be a string"))
+            })?
+            .to_string();
+
         // Get the parent context from the evaluator's ContextValue if available
         let parent_context = eval.eval_context().expect("expected eval context");
-
         // Get the file provider
         let file_provider = parent_context
             .file_provider
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No file provider available"))?;
-
         // Get the load resolver
         let load_resolver = parent_context
             .get_load_resolver()
             .ok_or_else(|| anyhow::anyhow!("No load resolver available"))?;
-
         // Get the current file path
         let current_file = parent_context
             .get_source_path()
@@ -886,10 +1350,10 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
 
         // Verify the resolved path exists
         if !file_provider.exists(&resolved_path) {
-            return Err(anyhow::anyhow!(
+            return Err(starlark::Error::new_other(anyhow::anyhow!(
                 "Module file not found: {}",
                 resolved_path.display()
-            ));
+            )));
         }
 
         let loader = build_module_loader_from_path(&resolved_path, parent_context);
@@ -902,6 +1366,21 @@ pub fn module_globals(builder: &mut GlobalsBuilder) {
 
         Ok(eval.heap().alloc(loader))
     }
+
+    fn eval_type(&self) -> Option<starlark::typing::Ty> {
+        Some(<FrozenModuleValue as StarlarkValue>::get_type_starlark_repr())
+    }
+}
+
+impl std::fmt::Display for ModuleType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<Module>")
+    }
+}
+
+#[starlark_module]
+pub fn module_globals(builder: &mut GlobalsBuilder) {
+    const Module: ModuleType = ModuleType;
 
     /// Declare a net/interface dependency on this module.
     fn io<'v>(

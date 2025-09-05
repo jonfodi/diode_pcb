@@ -32,6 +32,15 @@ use crate::lang::{
 };
 use crate::{Diagnostic, WithDiagnostics};
 
+/// Evaluation mode determines which features are active during evaluation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvalMode {
+    /// Build mode: ignores testbench() calls, focuses on artifact generation
+    Build,
+    /// Test mode: evaluates testbench() calls, skips artifact generation
+    Test,
+}
+
 #[cfg(feature = "native")]
 fn default_file_provider() -> Arc<dyn crate::FileProvider> {
     Arc::new(crate::DefaultFileProvider) as Arc<dyn crate::FileProvider>
@@ -48,6 +57,7 @@ use super::{
     context::{ContextValue, FrozenContextValue},
     interface::interface_globals,
     module::{module_globals, FrozenModuleValue, ModuleLoader},
+    test_bench::test_bench_globals,
 };
 
 /// A PrintHandler that collects all print output into a vector
@@ -282,6 +292,9 @@ pub struct EvalContext {
 
     /// Index to track which Module() call we're currently processing (for span resolution)
     current_module_index: RefCell<usize>,
+
+    /// Evaluation mode determining which features are active
+    pub(crate) eval_mode: EvalMode,
 }
 
 impl Default for EvalContext {
@@ -320,6 +333,7 @@ impl EvalContext {
             load_resolver: None,
             current_load_index: RefCell::new(0),
             current_module_index: RefCell::new(0),
+            eval_mode: EvalMode::Build,
         }
     }
 
@@ -354,6 +368,12 @@ impl EvalContext {
         self
     }
 
+    /// Set the evaluation mode.
+    pub fn set_eval_mode(mut self, mode: EvalMode) -> Self {
+        self.eval_mode = mode;
+        self
+    }
+
     /// Create a new Context that shares caches with this one
     pub fn child_context(&self) -> Self {
         Self {
@@ -372,6 +392,7 @@ impl EvalContext {
             load_resolver: self.load_resolver.clone(),
             current_load_index: RefCell::new(0),
             current_module_index: RefCell::new(0),
+            eval_mode: self.eval_mode,
         }
     }
 
@@ -401,6 +422,7 @@ impl EvalContext {
         .with(assert_globals)
         .with(file_globals)
         .with(model_globals)
+        .with(test_bench_globals)
         .build()
     }
 

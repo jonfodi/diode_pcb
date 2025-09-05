@@ -60,7 +60,7 @@ pub fn build(
     let spinner = Spinner::builder(format!("{file_name}: Building")).start();
 
     // Evaluate the design
-    let eval = pcb_zen::run(zen_path, offline);
+    let eval = pcb_zen::run(zen_path, offline, pcb_zen::EvalMode::Build);
 
     // Finish spinner before printing diagnostics
     if eval.is_empty() {
@@ -79,7 +79,7 @@ pub fn build(
 
     eval.output_result()
         .inspect_err(|_| {
-            println!(
+            eprintln!(
                 "{} {}: Build failed",
                 pcb_ui::icons::error(),
                 file_name.with_style(Style::Red).bold()
