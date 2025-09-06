@@ -93,6 +93,9 @@ Layout("layout", "layout/")
 ```bash
 # Compile the design and check for errors
 pcb build blinky.zen
+> [!NOTE]
+> RUST_LOG=debug pcb layout blinker.zen 
+> provides full logs in layout.log 
 
 # Output:
 # ✓ blinky.zen (2 components)
