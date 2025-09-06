@@ -2558,9 +2558,11 @@ class RouteConnections(Step):
         self.state = state
         self.board = board  
         self.netlist = netlist
+        logger.info(f"netlist: {netlist}")
         
     def run(self):
         for net in self.netlist.nets:
+            logger.info(f"net: {net}")
             self._route_net_with_straight_lines(net)
     
     # first step: route nets (get the copper on the board)
