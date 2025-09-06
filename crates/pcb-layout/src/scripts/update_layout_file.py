@@ -2711,7 +2711,7 @@ def main():
         board = pcbnew.LoadBoard(args.output)
 
     # Parse JSON netlist
-    logger.info(f"Parsing JSON netlist from {args.json_input}")
+    logger.info(f"HEY! Parsing JSON netlist from {args.json_input}")
     netlist = JsonNetlistParser.parse_netlist(args.json_input)
 
     if args.only_snapshot:

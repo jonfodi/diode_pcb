@@ -118,6 +118,13 @@ pub fn process_layout(
     // Load the update_layout_file_star.py script
     let script = include_str!("scripts/update_layout_file.py");
 
+    // In lib.rs, in the process_layout function, right before PythonScriptBuilder::new(script)
+    if script.contains("HEY!") {
+        debug!("Found HEY! in embedded script");
+    } else {
+        debug!("HEY! not found in embedded script");
+    }
+
     // Build and run the Python script using the new pcbnew API
     PythonScriptBuilder::new(script)
         .arg("-j")
