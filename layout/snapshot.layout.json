@@ -1,0 +1,526 @@
+{
+  "footprints": [
+    {
+      "dnp": false,
+      "exclude_from_bom": false,
+      "footprint": "LED_0402_1005Metric:LED_0402_1005Metric",
+      "graphical_items": [
+        {
+          "angle": null,
+          "end": {
+            "x": 147577500,
+            "y": 105495000
+          },
+          "layer": "F.Silkscreen",
+          "position": {
+            "x": 147527500,
+            "y": 105495000
+          },
+          "shape": 3,
+          "start": {
+            "x": 147527500,
+            "y": 105495000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 149547500,
+            "y": 105025000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 147687500,
+            "y": 105025000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147687500,
+            "y": 105025000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147687500,
+            "y": 105025000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 147687500,
+            "y": 105965000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147687500,
+            "y": 105965000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 149117500,
+            "y": 105245000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148117500,
+            "y": 105245000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148117500,
+            "y": 105245000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148117500,
+            "y": 105245000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148117500,
+            "y": 105745000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148117500,
+            "y": 105745000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148217500,
+            "y": 105245000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148217500,
+            "y": 105745000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148217500,
+            "y": 105745000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148317500,
+            "y": 105245000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148317500,
+            "y": 105745000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148317500,
+            "y": 105745000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": null,
+          "layer": "F.Fab",
+          "position": {
+            "x": 148617500,
+            "y": 105495000
+          },
+          "shape": null,
+          "start": null,
+          "text": "${REFERENCE}",
+          "type": "PCB_TEXT",
+          "width": null
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 149117500,
+            "y": 105745000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 149117500,
+            "y": 105245000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149117500,
+            "y": 105245000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148117500,
+            "y": 105745000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 149117500,
+            "y": 105745000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149117500,
+            "y": 105745000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 149547500,
+            "y": 105965000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 149547500,
+            "y": 105025000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149547500,
+            "y": 105025000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147687500,
+            "y": 105965000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 149547500,
+            "y": 105965000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149547500,
+            "y": 105965000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        }
+      ],
+      "group": null,
+      "layer": "F.Cu",
+      "locked": false,
+      "orientation": 0.0,
+      "pads": [
+        {
+          "layer": "F.Cu",
+          "name": "1",
+          "position": {
+            "x": 148132500,
+            "y": 105495000
+          }
+        },
+        {
+          "layer": "F.Cu",
+          "name": "2",
+          "position": {
+            "x": 149102500,
+            "y": 105495000
+          }
+        }
+      ],
+      "position": {
+        "x": 148617500,
+        "y": 105495000
+      },
+      "reference": "D1",
+      "uuid": "47eac9df-7946-5374-bbe4-19df3e2a5fa2",
+      "value": "LED RED"
+    },
+    {
+      "dnp": false,
+      "exclude_from_bom": false,
+      "footprint": "R_0402_1005Metric:R_0402_1005Metric",
+      "graphical_items": [
+        {
+          "angle": null,
+          "end": {
+            "x": 149312500,
+            "y": 104035000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 147452500,
+            "y": 104035000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147452500,
+            "y": 104035000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147452500,
+            "y": 104035000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 147452500,
+            "y": 104975000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147452500,
+            "y": 104975000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148907500,
+            "y": 104235000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 147857500,
+            "y": 104235000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147857500,
+            "y": 104235000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147857500,
+            "y": 104235000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 147857500,
+            "y": 104775000
+          },
+          "shape": 0,
+          "start": {
+            "x": 147857500,
+            "y": 104775000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148536141,
+            "y": 104125000
+          },
+          "layer": "F.Silkscreen",
+          "position": {
+            "x": 148228859,
+            "y": 104125000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148228859,
+            "y": 104125000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 120000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148536141,
+            "y": 104885000
+          },
+          "layer": "F.Silkscreen",
+          "position": {
+            "x": 148228859,
+            "y": 104885000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148228859,
+            "y": 104885000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 120000
+        },
+        {
+          "angle": null,
+          "end": null,
+          "layer": "F.Fab",
+          "position": {
+            "x": 148382500,
+            "y": 104505000
+          },
+          "shape": null,
+          "start": null,
+          "text": "${REFERENCE}",
+          "type": "PCB_TEXT",
+          "width": null
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 148907500,
+            "y": 104775000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148907500,
+            "y": 104235000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148907500,
+            "y": 104235000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147857500,
+            "y": 104775000
+          },
+          "layer": "F.Fab",
+          "position": {
+            "x": 148907500,
+            "y": 104775000
+          },
+          "shape": 0,
+          "start": {
+            "x": 148907500,
+            "y": 104775000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 100000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 149312500,
+            "y": 104975000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 149312500,
+            "y": 104035000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149312500,
+            "y": 104035000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        },
+        {
+          "angle": null,
+          "end": {
+            "x": 147452500,
+            "y": 104975000
+          },
+          "layer": "F.Courtyard",
+          "position": {
+            "x": 149312500,
+            "y": 104975000
+          },
+          "shape": 0,
+          "start": {
+            "x": 149312500,
+            "y": 104975000
+          },
+          "text": null,
+          "type": "PCB_SHAPE",
+          "width": 50000
+        }
+      ],
+      "group": null,
+      "layer": "F.Cu",
+      "locked": false,
+      "orientation": 0.0,
+      "pads": [
+        {
+          "layer": "F.Cu",
+          "name": "1",
+          "position": {
+            "x": 147872500,
+            "y": 104505000
+          }
+        },
+        {
+          "layer": "F.Cu",
+          "name": "2",
+          "position": {
+            "x": 148892500,
+            "y": 104505000
+          }
+        }
+      ],
+      "position": {
+        "x": 148382500,
+        "y": 104505000
+      },
+      "reference": "R1",
+      "uuid": "d527c2b8-3606-5386-bbed-5a45ed7b31a6",
+      "value": "1k"
+    }
+  ],
+  "groups": [],
+  "zones": []
+}
