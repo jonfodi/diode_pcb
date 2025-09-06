@@ -1,7 +1,7 @@
 ./src/common/stdpbase.cpp(59): assert ""traits"" failed in Get(): create wxApp before calling this
-INFO: Parsing JSON netlist from /var/folders/qg/gryxr1ks1z789bjys7yv269m0000gn/T/.tmpNXfpFI/netlist.json
-INFO: Found module D1 with layout_path: None
+INFO: Parsing JSON netlist from /var/folders/qg/gryxr1ks1z789bjys7yv269m0000gn/T/.tmpFVc20R/netlist.json
 INFO: Found module R1 with layout_path: None
+INFO: Found module D1 with layout_path: None
 INFO: --------------------------------------------------------------------------------
 INFO: Running step: SetupBoard
 INFO: --------------------------------------------------------------------------------
@@ -11,31 +11,35 @@ INFO: --------------------------------------------------------------------------
 INFO: Running step: ImportNetlist
 INFO: --------------------------------------------------------------------------------
 INFO: Starting ImportNetlist...
-INFO: Overwriting teensy_footprint:/Users/garyfodi/Desktop/PROJECTS/DIODE/pcb/layout/teensy_footprint.pretty with teensy_footprint:/Users/garyfodi/Desktop/PROJECTS/DIODE/pcb/layout/teensy_footprint.pretty
+DEBUG: Environment setup took 0.000 seconds
+DEBUG: Footprint library map loading took 0.002 seconds
 INFO: 47eac9df-7946-5374-bbe4-19df3e2a5fa2 (D1): Updating metadata
 INFO: d527c2b8-3606-5386-bbed-5a45ed7b31a6 (R1): Updating metadata
-INFO: Footprint synchronization took 0.002 seconds
+INFO: Footprint synchronization took 0.000 seconds
+INFO: Adding net VCC
+INFO: Connecting pad R1/1 to net VCC
 INFO: Adding net GND
 INFO: Connecting pad D1/1 to net GND
 INFO: Adding net LED_ANODE
 INFO: Connecting pad R1/2 to net LED_ANODE
 INFO: Connecting pad D1/2 to net LED_ANODE
-INFO: Adding net VCC
-INFO: Connecting pad R1/1 to net VCC
 INFO: Net synchronization took 0.000 seconds
 INFO: Group synchronization took 0.000 seconds
-INFO: Virtual DOM building took 0.001 seconds
+DEBUG: Board refresh took 0.000 seconds
+INFO: Virtual DOM building took 0.000 seconds
 INFO: Virtual DOM structure:
 INFO: Board VirtualBoundingBox(x=147427500, y=104010000, width=2145000, height=1980000)
   D1 VirtualBoundingBox(x=147427500, y=105000000, width=2145000, height=990000)
     D1.LED (LED_0402_1005Metric:LED_0402_1005Metric) VirtualBoundingBox(x=147427500, y=105000000, width=2145000, height=990000)
   R1 VirtualBoundingBox(x=147427500, y=104010000, width=1910000, height=990000)
     R1.R (R_0402_1005Metric:R_0402_1005Metric) VirtualBoundingBox(x=147427500, y=104010000, width=1910000, height=990000)
-INFO: Completed ImportNetlist in 0.006 seconds
+INFO: Completed ImportNetlist in 0.003 seconds
 INFO: --------------------------------------------------------------------------------
 INFO: Running step: SyncLayouts
 INFO: --------------------------------------------------------------------------------
 INFO: Starting SyncLayouts...
+DEBUG: Skipping group D1 - not newly added
+DEBUG: Skipping group R1 - not newly added
 INFO: Completed layout sync: synced 0 groups
 INFO: Completed SyncLayouts in 0.000 seconds
 INFO: --------------------------------------------------------------------------------
@@ -52,5 +56,5 @@ INFO: --------------------------------------------------------------------------
 INFO: Starting FinalizeBoard...
 INFO: Saved layout snapshot to /Users/garyfodi/Desktop/PROJECTS/DIODE/pcb/layout/snapshot.layout.json
 INFO: Snapshot export took 0.001 seconds
-INFO: Board saving took 0.003 seconds
-INFO: Completed FinalizeBoard in 0.004 seconds
+INFO: Board saving took 0.001 seconds
+INFO: Completed FinalizeBoard in 0.002 seconds

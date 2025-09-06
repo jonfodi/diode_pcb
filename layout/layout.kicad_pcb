@@ -78,19 +78,19 @@
 		)
 	)
 	(net 0 "")
-	(net 1 "GND")
-	(net 2 "VCC")
-	(net 3 "LED_ANODE")
-	(footprint "LED_0402_1005Metric:LED_0402_1005Metric"
+	(net 1 "VCC")
+	(net 2 "LED_ANODE")
+	(net 3 "GND")
+	(footprint "R_0402_1005Metric:R_0402_1005Metric"
 		(layer "F.Cu")
-		(uuid "19388e60-0c01-49eb-af95-9923b1f034e2")
-		(at 148.385 107.7)
-		(descr "LED SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: http://www.tortai-tech.com/upload/download/2011102023233369053.pdf), generated with kicad-footprint-generator")
-		(tags "LED")
-		(property "Reference" "D1"
+		(uuid "9192a5f3-3727-4107-8c3a-a13a50a78bf5")
+		(at 148.3825 104.505)
+		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
+		(tags "resistor")
+		(property "Reference" "R1"
 			(at 0 -1.17 0)
 			(layer "F.SilkS")
-			(uuid "7aaf6e22-3d92-4da6-a5ab-4d3b44a554dc")
+			(uuid "2a7d5c77-42cd-4a17-8009-3aa23c54afd8")
 			(effects
 				(font
 					(size 1 1)
@@ -98,11 +98,11 @@
 				)
 			)
 		)
-		(property "Value" "LED RED"
+		(property "Value" "1k"
 			(at 0 1.17 0)
 			(layer "F.Fab")
 			(hide yes)
-			(uuid "83f93ff1-0eb6-4f13-b381-a502af249be5")
+			(uuid "0ecc252a-507b-4594-82b0-3291ce7b9c71")
 			(effects
 				(font
 					(size 1 1)
@@ -115,7 +115,7 @@
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
-			(uuid "77b0b8ea-38ee-46d9-92d7-31be296acae4")
+			(uuid "507a20ac-cbff-4f8f-8a03-9d82061ce9ee")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -128,7 +128,7 @@
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
-			(uuid "984988a0-ceba-4986-9cdf-19e4ee9d740e")
+			(uuid "7a013b6d-86cd-4f14-be30-ef960d00e911")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -136,11 +136,11 @@
 				)
 			)
 		)
-		(property "Path" "D1.LED"
+		(property "Path" "R1.R"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "793c416d-8c97-4514-b35a-89b1958bd33d")
+			(uuid "d127ccb2-be5f-42b8-a0c6-5f6399d90549")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -148,11 +148,11 @@
 				)
 			)
 		)
-		(property "__symbol_value" "(symbol\n  \"LED_Small_Filled\"\n  (pin_numbers\n    (hide yes)\n  )\n  (pin_names\n    (offset 0.254)\n    (hide yes)\n  )\n  (exclude_from_sim no)\n  (in_bom yes)\n  (on_board yes)\n  (property\n    \"Reference\"\n    \"D\"\n    (at -1.27 3.175 0)\n    (effects\n      (font (size 1.27 1.27))\n      (justify left)\n    )\n  )\n  (property\n    \"Value\"\n    \"LED_Small_Filled\"\n    (at -4.445 -2.54 0)\n    (effects\n      (font (size 1.27 1.27))\n      (justify left)\n    )\n  )\n  (property\n    \"Footprint\"\n    \"\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Datasheet\"\n    \"~\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Description\"\n    \"Light emitting diode, small symbol, filled shape\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Sim.Pins\"\n    \"1=K 2=A\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_keywords\"\n    \"LED diode light-emitting-diode\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_fp_filters\"\n    \"LED* LED_SMD:* LED_THT:*\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (symbol\n    \"LED_Small_Filled_0_1\"\n    (polyline\n      (pts\n        (xy -0.762 -1.016)\n        (xy -0.762 1.016)\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0 0.762)\n        (xy -0.508 1.27)\n        (xy -0.254 1.27)\n        (xy -0.508 1.27)\n        (xy -0.508 1.016)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0.508 1.27)\n        (xy 0 1.778)\n        (xy 0.254 1.778)\n        (xy 0 1.778)\n        (xy 0 1.524)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0.762 -1.016)\n        (xy -0.762 0)\n        (xy 0.762 1.016)\n        (xy 0.762 -1.016)\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type outline)\n      )\n    )\n    (polyline\n      (pts\n        (xy 1.016 0)\n        (xy -0.762 0)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n  )\n  (symbol\n    \"LED_Small_Filled_1_1\"\n    (pin\n      passive\n      line\n      (at -2.54 0 0)\n      (length 1.778)\n      (name\n        \"K\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"1\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n    (pin\n      passive\n      line\n      (at 2.54 0 180)\n      (length 1.778)\n      (name\n        \"A\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"2\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n  )\n  (embedded_fonts no)\n)"
+		(property "Resistance" "1k"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "c6f89a06-8482-4fc8-b8d0-75cb39bd987f")
+			(uuid "6ab2706a-2c13-4639-a665-d8ab6ae338f4")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -160,11 +160,11 @@
 				)
 			)
 		)
-		(property "Type" "led"
+		(property "symbol_name" "R"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "d59e70fc-d1b6-4aa6-9726-76ec163d01f0")
+			(uuid "aebafe26-76a3-45f2-91b4-a14975895b45")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -172,35 +172,11 @@
 				)
 			)
 		)
-		(property "symbol_path" "/Users/garyfodi/Library/Caches/pcb/gitlab/kicad/libraries/kicad-symbols/9.0.0/Device.kicad_sym"
+		(property "__symbol_value" "(symbol\n  \"R\"\n  (pin_numbers\n    (hide yes)\n  )\n  (pin_names\n    (offset 0)\n  )\n  (exclude_from_sim no)\n  (in_bom yes)\n  (on_board yes)\n  (property\n    \"Reference\"\n    \"R\"\n    (at 2.032 0 90)\n    (effects\n      (font (size 1.27 1.27))\n    )\n  )\n  (property\n    \"Value\"\n    \"R\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n    )\n  )\n  (property\n    \"Footprint\"\n    \"\"\n    (at -1.778 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Datasheet\"\n    \"~\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Description\"\n    \"Resistor\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_keywords\"\n    \"R res resistor\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_fp_filters\"\n    \"R_*\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (symbol\n    \"R_0_1\"\n    (rectangle\n      (start\n        -1.016\n        -2.54\n      )\n      (end\n        1.016\n        2.54\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n  )\n  (symbol\n    \"R_1_1\"\n    (pin\n      passive\n      line\n      (at 0 3.81 270)\n      (length 1.27)\n      (name\n        \"~\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"1\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n    (pin\n      passive\n      line\n      (at 0 -3.81 90)\n      (length 1.27)\n      (name\n        \"~\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"2\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n  )\n  (embedded_fonts no)\n)"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "17276d32-bd59-4180-953b-afde73dff6b5")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "symbol_name" "LED_Small_Filled"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "567b84ea-fe6d-408a-94a7-4a370071fc95")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "prefix" "D"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "e84139e6-9422-4c6d-b3a2-ca7fe16688cd")
+			(uuid "afe5581c-020a-48c6-8949-600768f5cc6f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -212,7 +188,300 @@
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "0a8b8e15-9ee6-440d-a1f1-8a329f8f6be5")
+			(uuid "cb6dfec6-1b3a-438f-af9e-10912d9db7fa")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Type" "resistor"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "8ef8504a-55d5-4c19-b1cf-172e4f1372db")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "symbol_path" "/Users/garyfodi/Library/Caches/pcb/gitlab/kicad/libraries/kicad-symbols/9.0.0/Device.kicad_sym"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b8cc2608-127d-4fb9-8f6c-27765e6f407d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "prefix" "R"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "6eef800d-0b89-41be-bb7e-d0d9c8b5a259")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(path "/d527c2b8-3606-5386-bbed-5a45ed7b31a6/d527c2b8-3606-5386-bbed-5a45ed7b31a6")
+		(attr smd)
+		(fp_line
+			(start -0.153641 -0.38)
+			(end 0.153641 -0.38)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "4c63035a-c06e-4e5f-8588-8a4abc7ffa35")
+		)
+		(fp_line
+			(start -0.153641 0.38)
+			(end 0.153641 0.38)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "f382f2b4-377b-49f4-864f-b2455a1b46d1")
+		)
+		(fp_line
+			(start -0.93 -0.47)
+			(end 0.93 -0.47)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "f5002269-9853-4fb8-96ad-15e8771c8548")
+		)
+		(fp_line
+			(start -0.93 0.47)
+			(end -0.93 -0.47)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "97367a6b-eec5-4198-b566-173ddac4e3f9")
+		)
+		(fp_line
+			(start 0.93 -0.47)
+			(end 0.93 0.47)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "65e70d41-4b65-41b0-9cc8-0fa29e66c6a7")
+		)
+		(fp_line
+			(start 0.93 0.47)
+			(end -0.93 0.47)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "5a767398-02af-4274-b11c-41b009e37468")
+		)
+		(fp_line
+			(start -0.525 -0.27)
+			(end 0.525 -0.27)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "82fddc42-5bbe-449f-9de8-306028c9d3a0")
+		)
+		(fp_line
+			(start -0.525 0.27)
+			(end -0.525 -0.27)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "1948f571-a39b-434d-a7f1-ef76ea7d9331")
+		)
+		(fp_line
+			(start 0.525 -0.27)
+			(end 0.525 0.27)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "6d6ba2f7-7230-440f-97f0-c2ca3b76ba9e")
+		)
+		(fp_line
+			(start 0.525 0.27)
+			(end -0.525 0.27)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "393f47a5-c1a6-47a6-ae43-04f483c6bc6d")
+		)
+		(fp_text user "${REFERENCE}"
+			(at 0 0 0)
+			(layer "F.Fab")
+			(uuid "6481bfb1-149f-448e-a18a-058c2813e6c7")
+			(effects
+				(font
+					(size 0.26 0.26)
+					(thickness 0.04)
+				)
+			)
+		)
+		(pad "1" smd roundrect
+			(at -0.51 0)
+			(size 0.54 0.64)
+			(layers "F.Cu" "F.Mask" "F.Paste")
+			(roundrect_rratio 0.25)
+			(net 1 "VCC")
+			(uuid "aa5883d0-8c44-4f5f-bbca-1251e16e179d")
+		)
+		(pad "2" smd roundrect
+			(at 0.51 0)
+			(size 0.54 0.64)
+			(layers "F.Cu" "F.Mask" "F.Paste")
+			(roundrect_rratio 0.25)
+			(net 2 "LED_ANODE")
+			(uuid "dc773cc8-7ffe-456d-b0af-835d9943ffac")
+		)
+		(embedded_fonts no)
+		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0402_1005Metric.wrl"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
+	)
+	(footprint "LED_0402_1005Metric:LED_0402_1005Metric"
+		(layer "F.Cu")
+		(uuid "fcaa5ddc-8221-4ba6-a32e-eabbd1500f09")
+		(at 148.6175 105.495)
+		(descr "LED SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: http://www.tortai-tech.com/upload/download/2011102023233369053.pdf), generated with kicad-footprint-generator")
+		(tags "LED")
+		(property "Reference" "D1"
+			(at 0 -1.17 0)
+			(layer "F.SilkS")
+			(uuid "7bc900dd-cfc0-4ecc-997b-b9d6635cf01c")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Value" "LED RED"
+			(at 0 1.17 0)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "426edeb9-77a4-4cf6-839c-aa9334681e60")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "32ec865b-03d0-4d66-a9d9-5fc03f71113c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "5ca5f106-82d3-4dc7-98a7-ae534c724d11")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Path" "D1.LED"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "292722df-32e0-4948-bf58-d8efbcf2f953")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "symbol_path" "/Users/garyfodi/Library/Caches/pcb/gitlab/kicad/libraries/kicad-symbols/9.0.0/Device.kicad_sym"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "69cdec26-150a-4fb6-a011-dc4b483f9b0b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0402"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "6b677d92-7d4c-493c-b1dd-1bbd4528891b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "symbol_name" "LED_Small_Filled"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "cb9b79c3-cf9f-4995-aec3-7d4a638fdf9b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "prefix" "D"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ed50703d-9c8e-4f6f-a7a0-957496882fcd")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -224,7 +493,31 @@
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
-			(uuid "e0feb18c-df6f-448f-aaa1-0eaa8c1612cd")
+			(uuid "3d779970-5d51-4f3f-bf64-562574aecccd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Type" "led"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b21b8dab-7569-4daf-85cc-0a6595b50b29")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "__symbol_value" "(symbol\n  \"LED_Small_Filled\"\n  (pin_numbers\n    (hide yes)\n  )\n  (pin_names\n    (offset 0.254)\n    (hide yes)\n  )\n  (exclude_from_sim no)\n  (in_bom yes)\n  (on_board yes)\n  (property\n    \"Reference\"\n    \"D\"\n    (at -1.27 3.175 0)\n    (effects\n      (font (size 1.27 1.27))\n      (justify left)\n    )\n  )\n  (property\n    \"Value\"\n    \"LED_Small_Filled\"\n    (at -4.445 -2.54 0)\n    (effects\n      (font (size 1.27 1.27))\n      (justify left)\n    )\n  )\n  (property\n    \"Footprint\"\n    \"\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Datasheet\"\n    \"~\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Description\"\n    \"Light emitting diode, small symbol, filled shape\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Sim.Pins\"\n    \"1=K 2=A\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_keywords\"\n    \"LED diode light-emitting-diode\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_fp_filters\"\n    \"LED* LED_SMD:* LED_THT:*\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (symbol\n    \"LED_Small_Filled_0_1\"\n    (polyline\n      (pts\n        (xy -0.762 -1.016)\n        (xy -0.762 1.016)\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0 0.762)\n        (xy -0.508 1.27)\n        (xy -0.254 1.27)\n        (xy -0.508 1.27)\n        (xy -0.508 1.016)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0.508 1.27)\n        (xy 0 1.778)\n        (xy 0.254 1.778)\n        (xy 0 1.778)\n        (xy 0 1.524)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n    (polyline\n      (pts\n        (xy 0.762 -1.016)\n        (xy -0.762 0)\n        (xy 0.762 1.016)\n        (xy 0.762 -1.016)\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type outline)\n      )\n    )\n    (polyline\n      (pts\n        (xy 1.016 0)\n        (xy -0.762 0)\n      )\n      (stroke\n        (width 0)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n  )\n  (symbol\n    \"LED_Small_Filled_1_1\"\n    (pin\n      passive\n      line\n      (at -2.54 0 0)\n      (length 1.778)\n      (name\n        \"K\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"1\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n    (pin\n      passive\n      line\n      (at 2.54 0 180)\n      (length 1.778)\n      (name\n        \"A\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"2\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n  )\n  (embedded_fonts no)\n)"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "86bd7ff7-6899-4947-9c0c-03c11b284185")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -243,7 +536,7 @@
 			)
 			(fill no)
 			(layer "F.SilkS")
-			(uuid "98e7f4a2-e138-48e3-af68-6b1cc60efcb0")
+			(uuid "6e2841a0-a6b4-4d93-a54e-efdc2175d06a")
 		)
 		(fp_line
 			(start -0.93 -0.47)
@@ -253,7 +546,7 @@
 				(type solid)
 			)
 			(layer "F.CrtYd")
-			(uuid "d17c8d58-dc8e-4d8e-9fc9-1020fe33b64b")
+			(uuid "ce6c84a5-1adb-4cd2-85f4-449fc6eac4ba")
 		)
 		(fp_line
 			(start -0.93 0.47)
@@ -263,7 +556,7 @@
 				(type solid)
 			)
 			(layer "F.CrtYd")
-			(uuid "d2e801a4-ad92-41d9-a7dc-4845dbbb0b1a")
+			(uuid "553d9c85-87eb-4d00-b507-717a51faa6b3")
 		)
 		(fp_line
 			(start 0.93 -0.47)
@@ -273,7 +566,7 @@
 				(type solid)
 			)
 			(layer "F.CrtYd")
-			(uuid "59c244db-c59e-4394-bdac-0b80a759c801")
+			(uuid "0c938928-7dd5-4879-9c3d-814cf033a54a")
 		)
 		(fp_line
 			(start 0.93 0.47)
@@ -283,7 +576,7 @@
 				(type solid)
 			)
 			(layer "F.CrtYd")
-			(uuid "ccf4d6c1-67b2-4daf-902c-13526f0bbcbc")
+			(uuid "d167e6fd-6274-4865-924f-28b0bf97eaf2")
 		)
 		(fp_line
 			(start -0.5 -0.25)
@@ -293,7 +586,7 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "ffd9e16c-61e5-4c26-be0f-674d9d575e1a")
+			(uuid "5419bae3-2aa7-4e5b-b9ee-a1d205cc0ef3")
 		)
 		(fp_line
 			(start -0.5 0.25)
@@ -303,7 +596,7 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "b8d77b4a-888a-4554-bd82-28c983faa6d4")
+			(uuid "4f4c4306-8f6e-4261-9f1b-29a502882db0")
 		)
 		(fp_line
 			(start -0.4 0.25)
@@ -313,7 +606,7 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "719225da-1b4f-4115-af95-2850b9475fd6")
+			(uuid "7048c268-3fcf-4362-9cc0-32932a16dc4f")
 		)
 		(fp_line
 			(start -0.3 0.25)
@@ -323,7 +616,7 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "3f2ba3ad-ab7a-4888-88e2-b78e4f2011b1")
+			(uuid "70e2047e-9532-4859-bb5d-7c65e8fdd306")
 		)
 		(fp_line
 			(start 0.5 -0.25)
@@ -333,7 +626,7 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "60b8a0fe-edf4-4795-b684-864be7f3a2bb")
+			(uuid "849c7a04-f4a3-4243-bdf2-5b11964d5d6d")
 		)
 		(fp_line
 			(start 0.5 0.25)
@@ -343,12 +636,12 @@
 				(type solid)
 			)
 			(layer "F.Fab")
-			(uuid "2ca6f996-670a-4c26-8a72-2b01d1b05a5f")
+			(uuid "99b19685-2407-4921-b663-840577269c5a")
 		)
 		(fp_text user "${REFERENCE}"
 			(at 0 0 0)
 			(layer "F.Fab")
-			(uuid "16bdb6ef-ed48-4061-aefb-8a2733811ba5")
+			(uuid "91f8e6d6-6a16-469c-a7d8-6948c7c2802e")
 			(effects
 				(font
 					(size 0.25 0.25)
@@ -361,312 +654,19 @@
 			(size 0.59 0.64)
 			(layers "F.Cu" "F.Mask" "F.Paste")
 			(roundrect_rratio 0.25)
-			(net 1 "GND")
-			(uuid "a46017b9-75bd-4d47-a00f-d1ee28fdbd7d")
+			(net 3 "GND")
+			(uuid "7df2131b-166e-4fe7-916b-b7ed12aabf64")
 		)
 		(pad "2" smd roundrect
 			(at 0.485 0)
 			(size 0.59 0.64)
 			(layers "F.Cu" "F.Mask" "F.Paste")
 			(roundrect_rratio 0.25)
-			(net 3 "LED_ANODE")
-			(uuid "ca1ac219-a893-4d30-ae53-e31fa399534d")
+			(net 2 "LED_ANODE")
+			(uuid "3ebf81c1-b069-4766-88a6-d78b566f9398")
 		)
 		(embedded_fonts no)
 		(model "${KICAD9_3DMODEL_DIR}/LED_SMD.3dshapes/LED_0402_1005Metric.wrl"
-			(offset
-				(xyz 0 0 0)
-			)
-			(scale
-				(xyz 1 1 1)
-			)
-			(rotate
-				(xyz 0 0 0)
-			)
-		)
-	)
-	(footprint "R_0402_1005Metric:R_0402_1005Metric"
-		(layer "F.Cu")
-		(uuid "a6aa9fcf-ce49-4db0-ac37-d662ced89457")
-		(at 148.39 104.4)
-		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
-		(tags "resistor")
-		(property "Reference" "R1"
-			(at 0 -1.17 0)
-			(layer "F.SilkS")
-			(uuid "0a6ce726-8b37-4d0c-8df7-419e85db6ed7")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Value" "1k"
-			(at 0 1.17 0)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "4e3b03a6-fc80-4f80-ae33-1411cfbac2ab")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 0 0 0)
-			(unlocked yes)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "24dfe96e-12ce-4bb1-b81e-6e4e7a42bc00")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 0 0 0)
-			(unlocked yes)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "108d3450-a653-4149-b04d-a82a58c2436b")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Path" "R1.R"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "0183b77b-521d-4a2a-aad4-0f8697b193b1")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Type" "resistor"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "88b8dd69-ea74-45a9-86c2-38eb9dc891d8")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Package" "0402"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "087774eb-6467-4e7b-a3e4-13e4db20d135")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "prefix" "R"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "b218bc82-980e-45b5-b32d-588b6a9e8b11")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "symbol_name" "R"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "30b4812f-1935-4935-b20a-c96057ec2b40")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "symbol_path" "/Users/garyfodi/Library/Caches/pcb/gitlab/kicad/libraries/kicad-symbols/9.0.0/Device.kicad_sym"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "5a1199d1-3e13-43f1-a85c-79982508f851")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Resistance" "1k"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "4b5db0ed-ca4f-429f-94b1-ec1e54b572a6")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "__symbol_value" "(symbol\n  \"R\"\n  (pin_numbers\n    (hide yes)\n  )\n  (pin_names\n    (offset 0)\n  )\n  (exclude_from_sim no)\n  (in_bom yes)\n  (on_board yes)\n  (property\n    \"Reference\"\n    \"R\"\n    (at 2.032 0 90)\n    (effects\n      (font (size 1.27 1.27))\n    )\n  )\n  (property\n    \"Value\"\n    \"R\"\n    (at 0 0 90)\n    (effects\n      (font (size 1.27 1.27))\n    )\n  )\n  (property\n    \"Footprint\"\n    \"\"\n    (at -1.778 0 90)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Datasheet\"\n    \"~\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"Description\"\n    \"Resistor\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_keywords\"\n    \"R res resistor\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (property\n    \"ki_fp_filters\"\n    \"R_*\"\n    (at 0 0 0)\n    (effects\n      (font (size 1.27 1.27))\n      (hide yes)\n    )\n  )\n  (symbol\n    \"R_0_1\"\n    (rectangle\n      (start\n        -1.016\n        -2.54\n      )\n      (end\n        1.016\n        2.54\n      )\n      (stroke\n        (width 0.254)\n        (type default)\n      )\n      (fill\n        (type none)\n      )\n    )\n  )\n  (symbol\n    \"R_1_1\"\n    (pin\n      passive\n      line\n      (at 0 3.81 270)\n      (length 1.27)\n      (name\n        \"~\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"1\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n    (pin\n      passive\n      line\n      (at 0 -3.81 90)\n      (length 1.27)\n      (name\n        \"~\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n      (number\n        \"2\"\n        (effects\n          (font (size 1.27 1.27))\n        )\n      )\n    )\n  )\n  (embedded_fonts no)\n)"
-			(at 0 0 0)
-			(layer "F.SilkS")
-			(hide yes)
-			(uuid "7621e1f3-7f40-4022-b592-4f195ff2f748")
-			(effects
-				(font
-					(size 1.27 1.27)
-					(thickness 0.15)
-				)
-			)
-		)
-		(path "/d527c2b8-3606-5386-bbed-5a45ed7b31a6/d527c2b8-3606-5386-bbed-5a45ed7b31a6")
-		(attr smd)
-		(fp_line
-			(start -0.153641 -0.38)
-			(end 0.153641 -0.38)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "e13a8a6b-52cc-4d2e-ab1b-161f26f7fcb1")
-		)
-		(fp_line
-			(start -0.153641 0.38)
-			(end 0.153641 0.38)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "7dc53bb9-a570-4d42-af2d-a43972b8e74f")
-		)
-		(fp_line
-			(start -0.93 -0.47)
-			(end 0.93 -0.47)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "581e6b44-4042-424f-a207-e1bb33b458a7")
-		)
-		(fp_line
-			(start -0.93 0.47)
-			(end -0.93 -0.47)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "7ab75ddb-eb6c-48ec-aadd-62ad3af9e599")
-		)
-		(fp_line
-			(start 0.93 -0.47)
-			(end 0.93 0.47)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "7618852a-f72f-4719-b2e3-d07d2312b189")
-		)
-		(fp_line
-			(start 0.93 0.47)
-			(end -0.93 0.47)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "1d233813-52f6-41de-a17d-7fec0b6da0ac")
-		)
-		(fp_line
-			(start -0.525 -0.27)
-			(end 0.525 -0.27)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "09204044-a0f4-4c1c-a041-7203117ee8c6")
-		)
-		(fp_line
-			(start -0.525 0.27)
-			(end -0.525 -0.27)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "b30f79fc-b3f7-4dbe-a89d-e8abe9bbdee6")
-		)
-		(fp_line
-			(start 0.525 -0.27)
-			(end 0.525 0.27)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "fee94c40-af7e-4a68-b441-1cfb7cea0489")
-		)
-		(fp_line
-			(start 0.525 0.27)
-			(end -0.525 0.27)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "3c55b74c-1ee5-4e75-9ff0-f9f1dc1a44d4")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 0 0)
-			(layer "F.Fab")
-			(uuid "916523d3-5a60-459d-a454-120b7c8fec9d")
-			(effects
-				(font
-					(size 0.26 0.26)
-					(thickness 0.04)
-				)
-			)
-		)
-		(pad "1" smd roundrect
-			(at -0.51 0)
-			(size 0.54 0.64)
-			(layers "F.Cu" "F.Mask" "F.Paste")
-			(roundrect_rratio 0.25)
-			(net 2 "VCC")
-			(uuid "3b3f2f32-8580-458a-b355-79dd0d4f8722")
-		)
-		(pad "2" smd roundrect
-			(at 0.51 0)
-			(size 0.54 0.64)
-			(layers "F.Cu" "F.Mask" "F.Paste")
-			(roundrect_rratio 0.25)
-			(net 3 "LED_ANODE")
-			(uuid "7c2a72ca-a40f-42e5-9c73-24dcfd392b5a")
-		)
-		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0402_1005Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)

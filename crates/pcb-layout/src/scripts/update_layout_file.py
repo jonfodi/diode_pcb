@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple
 from enum import Enum
 from typing import Any
+import warnings
 
 # Global logger.
 logger = logging.getLogger("pcb")
@@ -64,6 +65,17 @@ if python_path:
 # Available in KiCad's Python environment.
 import pcbnew
 
+def wx_warning_handler(message, category, filename, lineno, file=None, line=None):
+    """Custom warning handler that logs wx warnings but allows execution to continue."""
+    if 'wxApp' in str(message) or 'traits' in str(message):
+        logger.warning(f"wxWidgets assertion (non-fatal): {message}")
+    else:
+        # Use default warning behavior for other warnings
+        warnings.showwarning(message, category, filename, lineno, file, line)
+
+# Set the custom warning handler
+warnings.showwarning = wx_warning_handler
+os.environ['WX_SUPPRESS_ASSERT'] = '1'
 
 ####################################################################################################
 # JSON Netlist Parser
