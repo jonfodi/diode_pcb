@@ -76,6 +76,7 @@ def wx_warning_handler(message, category, filename, lineno, file=None, line=None
 # Set the custom warning handler
 warnings.showwarning = wx_warning_handler
 os.environ['WX_SUPPRESS_ASSERT'] = '1'
+logger.info("WX_SUPPRESS_ASSERT environment variable set")
 
 ####################################################################################################
 # JSON Netlist Parser
