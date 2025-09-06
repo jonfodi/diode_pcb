@@ -4,6 +4,8 @@ This demonstrates using standard components to create a basic LED driver.
 """
 
 load("@stdlib/interfaces.zen", "Power", "Ground")
+load("@stdlib/properties.zen", "Layout")
+
 
 Resistor = Module("@stdlib/generics/Resistor.zen")
 Led = Module("@stdlib:v0.2.2/generics/Led.zen")
@@ -22,3 +24,5 @@ led_anode = Net("LED_ANODE")
 # Create the LED circuit
 Resistor(name="R1", value=r_value, package="0603", P1=vcc.NET, P2=led_anode)
 Led(name="D1", color=led_color, package="0603", A=led_anode, K=gnd.NET) 
+
+Layout("layout", "layout/")

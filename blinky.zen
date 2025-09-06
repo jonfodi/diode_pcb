@@ -23,6 +23,6 @@ Led(
     color = "red",
     A = led_anode,
     K = gnd
-)'
+)
 
 Layout("layout", "layout/")

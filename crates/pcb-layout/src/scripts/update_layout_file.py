@@ -2540,6 +2540,92 @@ class FinalizeBoard(Step):
         pcbnew.SaveBoard(self.board.GetFileName(), self.board)
         logger.info(f"Board saving took {time.time() - save_start:.3f} seconds")
 
+class RouteConnections(Step):
+    def __init__(self, state: SyncState, board: pcbnew.BOARD, netlist: JsonNetlistParser):
+        self.state = state
+        self.board = board  
+        self.netlist = netlist
+        
+    def run(self):
+        for net in self.netlist.nets:
+            self._route_net_with_straight_lines(net)
+            
+    def _route_net_with_straight_lines(self, net):
+        """Route a net by connecting all pads with straight copper traces."""
+        if len(net.nodes) < 2:
+            return  # Need at least 2 nodes to route
+        
+        # Get all pad positions for this net
+        pad_positions = []
+        net_code = None
+        
+        for ref_des, pad_num, net_name in net.nodes:
+            # Find the footprint on the board
+            footprint = self.board.FindFootprintByReference(ref_des)
+            if not footprint:
+                logger.warning(f"Footprint {ref_des} not found for net {net_name}")
+                continue
+                
+            # Find the specific pad
+            pad = footprint.FindPadByNumber(pad_num)
+            if not pad:
+                logger.warning(f"Pad {pad_num} not found on {ref_des} for net {net_name}")
+                continue
+                
+            # Get the net code (should be same for all pads in this net)
+            if net_code is None:
+                net_code = pad.GetNetCode()
+                
+            # Store pad position and layer info
+            pad_positions.append({
+                'position': pad.GetPosition(),
+                'layer': pad.GetLayer(),
+                'ref': ref_des,
+                'pad': pad_num
+            })
+        
+        if len(pad_positions) < 2:
+            logger.warning(f"Not enough valid pads found for net {net.name}")
+            return
+            
+        if net_code is None or net_code == 0:
+            logger.warning(f"No valid net code found for net {net.name}")
+            return
+        
+        logger.info(f"Routing net {net.name} with {len(pad_positions)} pads")
+        
+        # Create star topology: connect all pads to the first pad
+        first_pad = pad_positions[0]
+        
+        for i in range(1, len(pad_positions)):
+            current_pad = pad_positions[i]
+            
+            # Create a track between first_pad and current_pad
+            track = pcbnew.PCB_TRACK(self.board)
+            
+            # Set start and end points
+            track.SetStart(first_pad['position'])
+            track.SetEnd(current_pad['position'])
+            
+            # Set the layer (use copper layers)
+            # For simplicity, use F.Cu if both pads are on front, B.Cu if both on back
+            # Otherwise use F.Cu as default
+            if first_pad['layer'] == current_pad['layer']:
+                track.SetLayer(first_pad['layer'])
+            else:
+                # Mixed layers - use front copper as default
+                track.SetLayer(pcbnew.F_Cu)
+            
+            # Set track width (0.2mm = 200000 nanometers)
+            track.SetWidth(200000)
+            
+            # Set the net code to connect this track to the net
+            track.SetNetCode(net_code)
+            
+            # Add track to the board
+            self.board.Add(track)
+            
+            logger.debug(f"  Added track: {first_pad['ref']}.{first_pad['pad']} -> {current_pad['ref']}.{current_pad['pad']}")
 
 ####################################################################################################
 # Command-line interface
@@ -2625,6 +2711,7 @@ def main():
             ImportNetlist(state, board, args.output, netlist),
             SyncLayouts(state, board, netlist),
             PlaceComponents(state, board, netlist),
+            RouteConnections(state, board, netlist),
             FinalizeBoard(state, board, Path(args.snapshot) if args.snapshot else None),
         ]
 
