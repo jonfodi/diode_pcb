@@ -2562,7 +2562,10 @@ class RouteConnections(Step):
     def run(self):
         for net in self.netlist.nets:
             self._route_net_with_straight_lines(net)
-            
+    
+    # first step: route nets (get the copper on the board)
+    # 2. add conditional logic on type of net (vcc, gnd, high speed, etc.)
+
     def _route_net_with_straight_lines(self, net):
         """Route a net by connecting all pads with straight copper traces."""
         if len(net.nodes) < 2:
@@ -2571,9 +2574,10 @@ class RouteConnections(Step):
         # Get all pad positions for this net
         pad_positions = []
         net_code = None
-        
+        logger.info(f"nets: {net}")
+
         for ref_des, pad_num, net_name in net.nodes:
-            # Find the footprint on the board
+            logger.info(f"net.nodes: {net.nodes}")
             footprint = self.board.FindFootprintByReference(ref_des)
             if not footprint:
                 logger.warning(f"Footprint {ref_des} not found for net {net_name}")
