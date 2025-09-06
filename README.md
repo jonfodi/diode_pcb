@@ -40,6 +40,8 @@ cd pcb
 # Install using the provided script
 ./install.sh
 ```
+> [!NOTE]
+> whenever changes are made, you need to reinstall!
 
 > [!NOTE]
 > Package manager installation coming soon.
