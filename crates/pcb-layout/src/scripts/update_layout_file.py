@@ -2580,7 +2580,7 @@ class RouteConnections(Step):
         pad_positions = []
         net_code = None
 
-        for ref_des, pad_num, net_name in net.nodes:
+        for cmpt_name, pad_num, net_name in net.nodes:
             logger.info(f"net.nodes: {net.nodes}")
             logger.info(f"ref_des: {ref_des}")
             logger.info(f"pad_num: {pad_num}")

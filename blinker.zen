@@ -10,7 +10,7 @@ led_anode = Net("LED_ANODE")
 
 # Create components
 Resistor(
-    name = "R1",
+    name = "sup",
     value = "1kohm",
     package = "0402",
     P1 = vcc,
