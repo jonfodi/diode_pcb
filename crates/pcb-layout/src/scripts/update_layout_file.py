@@ -2580,7 +2580,7 @@ class RouteConnections(Step):
         pad_positions = []
         net_code = None
 
-        for cmpt_name, pad_num, net_name in net.nodes:
+        for ref_des, pad_num, net_name in net.nodes:
             logger.info(f"net.nodes: {net.nodes}")
             logger.info(f"ref_des: {ref_des}")
             logger.info(f"pad_num: {pad_num}")
@@ -2641,7 +2641,7 @@ class RouteConnections(Step):
             # Add track to the board
             self.board.Add(track)
             
-            logger.debug(f"  Added track: {first_pad['ref']}.{first_pad['pad']} -> {current_pad['ref']}.{current_pad['pad']}")
+            logger.debug(f"  Added track: {first_pad['ref_des']}.{first_pad['pad']} -> {current_pad['ref_des']}.{current_pad['pad']}")
 
 ####################################################################################################
 # Command-line interface
