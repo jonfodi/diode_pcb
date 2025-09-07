@@ -2579,10 +2579,12 @@ class RouteConnections(Step):
         # Get all pad positions for this net
         pad_positions = []
         net_code = None
-        logger.info(f"nets: {net}")
 
         for ref_des, pad_num, net_name in net.nodes:
             logger.info(f"net.nodes: {net.nodes}")
+            logger.info(f"ref_des: {ref_des}")
+            logger.info(f"pad_num: {pad_num}")
+            logger.info(f"net_name: {net_name}")
             footprint = self.board.FindFootprintByReference(ref_des)
             if not footprint:
                 logger.warning(f"Footprint {ref_des} not found for net {net_name}")
@@ -2605,14 +2607,6 @@ class RouteConnections(Step):
                 'ref': ref_des,
                 'pad': pad_num
             })
-        
-        if len(pad_positions) < 2:
-            logger.warning(f"Not enough valid pads found for net {net.name}")
-            return
-            
-        if net_code is None or net_code == 0:
-            logger.warning(f"No valid net code found for net {net.name}")
-            return
         
         logger.info(f"Routing net {net.name} with {len(pad_positions)} pads")
         
